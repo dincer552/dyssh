@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +59,7 @@ import com.dincer552.dyssh.security.SshKeyImportManager
 import com.dincer552.dyssh.ssh.AuthenticationMethod
 import com.dincer552.dyssh.ssh.SshServerProfile
 import com.dincer552.dyssh.ssh.SshServerProfileStore
+import com.dincer552.dyssh.ApkVerificationResult
 import com.google.android.play.core.appupdate.AppUpdateManager as PlayAppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import com.google.android.play.core.appupdate.AppUpdateOptions
@@ -177,18 +179,21 @@ private fun MainScreen(
     var downloadPercent by remember { mutableIntStateOf(0) }
     var pendingInstallUri by remember { mutableStateOf<Uri?>(null) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
+    var isVerifyingApk by remember { mutableStateOf(false) }
+    var apkVerificationResult by remember { mutableStateOf<ApkVerificationResult?>(null) }
     val updateScope = rememberCoroutineScope()
     val checkGitHubUpdates: () -> Unit = {
         if (!BuildConfig.DEBUG && !BuildConfig.PLAY_DISTRIBUTION && !isCheckingUpdate) {
             isCheckingUpdate = true
             updateError = null
+            apkVerificationResult = null
             updateScope.launch {
                 try {
                     githubUpdate = AppUpdateManager.checkForUpdate()
-                    githubUpdateStatus = if (githubUpdate == null) "G\u00FCncel" else "Yeni s\u00FCr\u00FCm ${githubUpdate?.versionName} mevcut"
+                    githubUpdateStatus = if (githubUpdate == null) "Güncel" else "Yeni sürüm ${githubUpdate?.versionName} mevcut"
                 } catch (error: Exception) {
-                    githubUpdateStatus = "G\u00FCncelleme kontrol edilemedi"
-                    updateError = error.message ?: "A\u011F hatas\u0131"
+                    githubUpdateStatus = "Güncelleme kontrol edilemedi"
+                    updateError = error.message ?: "Ağ hatası"
                 } finally {
                     isCheckingUpdate = false
                 }
@@ -252,14 +257,30 @@ private fun MainScreen(
                 DownloadManager.STATUS_SUCCESSFUL -> {
                     val uri = withContext(Dispatchers.IO) { AppUpdateManager.getDownloadedUri(context, id) }
                     downloadId = null
-                    if (uri == null) updateError = "İndirilen APK bulunamadı."
-                    else {
-                        pendingInstallUri = uri
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                            !context.packageManager.canRequestPackageInstalls()
-                        ) installPermissionLauncher.launch(
-                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
-                        ) else openApkInstaller(context, uri)
+                    if (uri == null) {
+                        updateError = "İndirilen APK bulunamadı."
+                    } else {
+                        isVerifyingApk = true
+                        updateScope.launch {
+                            try {
+                                val result = AppUpdateManager.verifyDownloadedApk(context, uri)
+                                apkVerificationResult = result
+                                if (result.isValid) {
+                                    pendingInstallUri = uri
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                        !context.packageManager.canRequestPackageInstalls()
+                                    ) installPermissionLauncher.launch(
+                                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                                    ) else openApkInstaller(context, uri)
+                                } else {
+                                    updateError = "APK doğrulama başarısız: ${result.errorMessage ?: "Bilinmeyen hata"}"
+                                }
+                            } catch (e: Exception) {
+                                updateError = "APK doğrulanamadı: ${e.message ?: "Bilinmeyen hata"}"
+                            } finally {
+                                isVerifyingApk = false
+                            }
+                        }
                     }
                     break
                 }
@@ -354,23 +375,38 @@ private fun MainScreen(
             if (!BuildConfig.PLAY_DISTRIBUTION) {
                 OutlinedButton(
                     onClick = checkGitHubUpdates,
-                    enabled = !BuildConfig.DEBUG && !isCheckingUpdate && downloadId == null,
+                    enabled = !BuildConfig.DEBUG && !isCheckingUpdate && downloadId == null && !isVerifyingApk,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         when {
                             BuildConfig.DEBUG -> "Release APK required for updates"
-                            isCheckingUpdate -> "G\u00FCncellemeler kontrol ediliyor..."
-                            else -> "G\u00FCncellemeleri kontrol et"
+                            isCheckingUpdate -> "Güncellemeler kontrol ediliyor..."
+                            isVerifyingApk -> "APK doğrulanıyor..."
+                            else -> "Güncellemeleri kontrol et"
                         }
                     )
                 }
             }
             val updateStatus = if (BuildConfig.PLAY_DISTRIBUTION) playUpdateStatus else githubUpdateStatus
             Text("${BuildConfig.VERSION_NAME} • $updateStatus", color = AppMuted, fontSize = 10.sp)
+            
+            githubUpdate?.releaseNotes?.let { notes ->
+                Text(notes, color = AppMuted, fontSize = 10.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+            
+            apkVerificationResult?.let { result ->
+                if (result.isValid) {
+                    Text("APK doğrulandı: Paket=${result.packageName} v${result.versionName} (kod ${result.versionCode}), İmza=${if (result.signatureMatches) "Eşleşiyor" else "UYUŞMUYOR"}, SHA-256=${if (result.sha256Matches) "Eşleşiyor" else "Atlandı"}",
+                        color = AppGreen, fontSize = 10.sp)
+                } else {
+                    Text("APK doğrulama başarısız: ${result.errorMessage}", color = Color(0xFFFF8A80), fontSize = 10.sp)
+                }
+            }
+            
             if (BuildConfig.PLAY_DISTRIBUTION && playUpdateAvailable) {
                 OutlinedButton(onClick = onPlayUpdate, modifier = Modifier.fillMaxWidth()) { Text("PLAY STORE'DAN GÜNCELLE") }
-            } else if (!BuildConfig.DEBUG && !BuildConfig.PLAY_DISTRIBUTION && githubUpdate != null && downloadId == null) {
+            } else if (!BuildConfig.DEBUG && !BuildConfig.PLAY_DISTRIBUTION && githubUpdate != null && downloadId == null && !isVerifyingApk) {
                 OutlinedButton(
                     onClick = {
                         updateError = null
@@ -378,7 +414,7 @@ private fun MainScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("İMZALI APK'Yİ GÜNCELLE • ${githubUpdate!!.versionName}") }
-            } else if (!BuildConfig.DEBUG && !BuildConfig.PLAY_DISTRIBUTION && updateError != null && downloadId == null) {
+            } else if (!BuildConfig.DEBUG && !BuildConfig.PLAY_DISTRIBUTION && updateError != null && downloadId == null && !isVerifyingApk) {
                 OutlinedButton(
                     onClick = checkGitHubUpdates,
                     modifier = Modifier.fillMaxWidth()
