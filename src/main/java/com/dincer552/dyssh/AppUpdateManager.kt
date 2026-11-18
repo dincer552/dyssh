@@ -226,18 +226,14 @@ object AppUpdateManager {
                 null
             }
 
-            // For Android 9+ (API 28+), use SigningInfo for proper comparison
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && currentSigningInfo != null && apkSigningInfo != null) {
-                return apkSigningInfo.hasMultipleSigners == currentSigningInfo.hasMultipleSigners &&
-                       apkSigningInfo.apkContentsSigners?.contentEquals(currentSigningInfo.apkContentsSigners) == true
-            }
-
-            // Fallback for older Android: compare certificate arrays
+            // Use certificate array comparison for all API levels (more reliable)
+            // Get current app's signing certificates
             val currentCerts = currentSigningInfo?.apkContentsSigners
                 ?: currentSigningInfo?.signingCertificateHistory
                 ?: currentPkgInfo.signatures
                 ?: return false
 
+            // Get APK's signing certificates
             val apkCerts = apkSigningInfo?.apkContentsSigners
                 ?: apkSigningInfo?.signingCertificateHistory
                 ?: pkgInfo.signatures
