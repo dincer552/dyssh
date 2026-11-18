@@ -28,7 +28,8 @@ class AppUpdateManagerTest {
             versionName = "1.0.5",
             apkUrl = "https://github.com/dincer552/dyssh/releases/download/v1.0.5/dyssh.apk",
             releaseNotes = "Bug fixes",
-            publishedAt = "2024-01-15T10:00:00Z"
+            publishedAt = "2024-01-15T10:00:00Z",
+            assetSha256 = "abc123def456"
         )
 
         assertEquals(5, update.versionCode)
@@ -36,6 +37,22 @@ class AppUpdateManagerTest {
         assertTrue(update.apkUrl.startsWith("https://"))
         assertEquals("Bug fixes", update.releaseNotes)
         assertEquals("2024-01-15T10:00:00Z", update.publishedAt)
+        assertEquals("abc123def456", update.assetSha256)
+    }
+
+    @Test
+    fun testReleaseUpdateDataClassWithoutOptionalFields() {
+        val update = ReleaseUpdate(
+            versionCode = 5,
+            versionName = "1.0.5",
+            apkUrl = "https://github.com/dincer552/dyssh/releases/download/v1.0.5/dyssh.apk"
+        )
+
+        assertEquals(5, update.versionCode)
+        assertEquals("1.0.5", update.versionName)
+        assertNull(update.releaseNotes)
+        assertNull(update.publishedAt)
+        assertNull(update.assetSha256)
     }
 
     @Test
@@ -46,6 +63,7 @@ class AppUpdateManagerTest {
             versionCode = 5,
             versionName = "1.0.5",
             signatureMatches = true,
+            sha256Matches = true,
             errorMessage = null
         )
 
@@ -54,6 +72,7 @@ class AppUpdateManagerTest {
         assertEquals(5, validResult.versionCode)
         assertEquals("1.0.5", validResult.versionName)
         assertTrue(validResult.signatureMatches)
+        assertTrue(validResult.sha256Matches)
         assertNull(validResult.errorMessage)
 
         val invalidResult = ApkVerificationResult(
@@ -62,12 +81,14 @@ class AppUpdateManagerTest {
             versionCode = 5,
             versionName = "1.0.5",
             signatureMatches = false,
+            sha256Matches = false,
             errorMessage = "Package name mismatch; Signature mismatch"
         )
 
         assertFalse(invalidResult.isValid)
         assertEquals("com.other.app", invalidResult.packageName)
         assertFalse(invalidResult.signatureMatches)
+        assertFalse(invalidResult.sha256Matches)
         assertNotNull(invalidResult.errorMessage)
     }
 

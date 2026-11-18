@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -391,12 +392,12 @@ private fun MainScreen(
             Text("${BuildConfig.VERSION_NAME} • $updateStatus", color = AppMuted, fontSize = 10.sp)
             
             githubUpdate?.releaseNotes?.let { notes ->
-                Text(notes, color = AppMuted, fontSize = 10.sp, maxLines = 3, overflow = androidx.compose.ui.text.TextOverflow.Ellipsis)
+                Text(notes, color = AppMuted, fontSize = 10.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             
             apkVerificationResult?.let { result ->
                 if (result.isValid) {
-                    Text("APK doğrulandı: Paket=${result.packageName} v${result.versionName} (kod ${result.versionCode}), İmza eşleşiyor", 
+                    Text("APK doğrulandı: Paket=${result.packageName} v${result.versionName} (kod ${result.versionCode}), İmza=${if (result.signatureMatches) "Eşleşiyor" else "UYUŞMUYOR"}, SHA-256=${if (result.sha256Matches) "Eşleşiyor" else "Atlandı"}",
                         color = AppGreen, fontSize = 10.sp)
                 } else {
                     Text("APK doğrulama başarısız: ${result.errorMessage}", color = Color(0xFFFF8A80), fontSize = 10.sp)
