@@ -98,18 +98,22 @@ jobs:
       - name: Verify signed DYSSH APK
         if: steps.signing.outputs.configured == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         run: |
-          APK="build/outputs/apk/release/app-release.apk"
-          test -s "$APK"
+          APK="$(find build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$APK" && test -s "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | grep -F "package: name='com.dincer552.dyssh' versionCode='$APP_VERSION_CODE'"
-          mkdir -p build/outputs/apk/release
           cp "$APK" build/outputs/apk/release/dyssh.apk
 
+      - name: Verify and expose debug APK path
+        run: |
+          DEBUG_APK="$(find build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$DEBUG_APK"
+          echo "Debug APK: $DEBUG_APK"
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: dyssh-debug-apk
-          path: build/outputs/apk/debug/app-debug.apk
+          path: build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
