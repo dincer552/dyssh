@@ -42,7 +42,7 @@ class SshServerProfileTest {
         )
 
         assertNotNull(profile.id)
-        assertTrue(UUID.fromString(profile.id).version == 4) // Random UUID
+        assertTrue(UUID.fromString(profile.id).version() == 4) // Random UUID
         assertEquals(22, profile.port)
         assertEquals(AuthenticationMethod.PRIVATE_KEY, profile.authenticationMethod)
         assertEquals("", profile.password)
