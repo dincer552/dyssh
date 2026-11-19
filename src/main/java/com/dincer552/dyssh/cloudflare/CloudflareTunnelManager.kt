@@ -132,17 +132,17 @@ class CloudflareTunnelManager(
  */
 internal fun isCloudflareAccessUrl(value: String, hostname: String): Boolean = try {
     val uri = java.net.URI(value)
-    val host = uri.getHost()
-    val path = uri.getPath()
+    val host = uri.host
+    val path = uri.path
     val officialAccessHost = host == "cloudflareaccess.com" ||
         host.endsWith(".cloudflareaccess.com") ||
         host == "cloudflareaccess.org" ||
         host.endsWith(".cloudflareaccess.org")
     val configuredTunnelAccessPath =
-        uri.getScheme == "https" &&
+        uri.scheme == "https" &&
         host?.equals(hostname, ignoreCase = true) == true &&
         path != null && path.startsWith("/cdn-cgi/access/")
-    uri.getScheme == "https" && (officialAccessHost || configuredTunnelAccessPath)
+    uri.scheme == "https" && (officialAccessHost || configuredTunnelAccessPath)
 } catch (_: Exception) {
     false
 }
