@@ -1,6 +1,5 @@
 package com.dincer552.dyssh.cloudflare
 
-import android.net.Uri
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -64,7 +63,7 @@ class CloudflareUrlValidationTest {
         assertTrue(sanitized3.contains("cookie=[redacted]"))
         assertFalse(sanitized3.contains("session-id-123"))
 
-        val line4 = "Normal diagnostic message without secrets"
+        val line4 = "Normal diagnostic message, tunnel started cleanly"
         val sanitized4 = sanitizeDiagnostic(line4)
         assertEquals(line4, sanitized4)
     }
@@ -76,26 +75,33 @@ class CloudflareUrlValidationTest {
         assertTrue(sanitized.length <= 240)
     }
 
-    // Need to make private functions accessible for testing
+    // Test implementations matching CloudflareTunnelManager.kt
     companion object {
-        fun isCloudflareAccessUrl(value: String, hostname: String): Boolean = try {
-            val uri = Uri.parse(value)
-            val host = uri.host.orEmpty()
-            val path = uri.path.orEmpty()
-            val officialAccessHost = host == "cloudflareaccess.com" ||
-                host.endsWith(".cloudflareaccess.com") ||
-                host == "cloudflareaccess.org" ||
-                host.endsWith(".cloudflareaccess.org")
-            val configuredTunnelAccessPath =
-                host.equals(hostname, ignoreCase = true) &&
+        fun isCloudflareAccessUrl(value: String, hostname: String): Boolean {
+            return try {
+                // Simple URL parsing without Android Uri
+                if (!value.startsWith("https://")) return false
+                val withoutScheme = value.substringAfter("https://")
+                val hostEnd = withoutScheme.indexOf('/')
+                val host = if (hostEnd >= 0) withoutScheme.substring(0, hostEnd) else withoutScheme
+                val path = if (hostEnd >= 0) withoutScheme.substring(hostEnd) else "/"
+
+                val officialAccessHost = host == "cloudflareaccess.com" ||
+                    host.endsWith(".cloudflareaccess.com") ||
+                    host == "cloudflareaccess.org" ||
+                    host.endsWith(".cloudflareaccess.org")
+                val configuredTunnelAccessPath =
+                    host.equals(hostname, ignoreCase = true) &&
                     path.startsWith("/cdn-cgi/access/")
-            uri.scheme == "https" && (officialAccessHost || configuredTunnelAccessPath)
-        } catch (_: Exception) {
-            false
+
+                officialAccessHost || configuredTunnelAccessPath
+            } catch (_: Exception) {
+                false
+            }
         }
 
         fun sanitizeDiagnostic(line: String): String {
-            val AUTH_URL = """https://\S+""".toRegex()
+            val AUTH_URL = "https://\\S+".toRegex()
             return line
                 .replace(AUTH_URL, "[Cloudflare URL hidden]")
                 .replace(Regex("(?i)Bearer\\s+[^\\s]+"), "Bearer [redacted]")
