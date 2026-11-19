@@ -98,7 +98,7 @@ class CloudflareTunnelManager(
         }
     }
 
-    private fun isCloudflareAccessUrl(value: String, hostname: String): Boolean = try {
+    internal fun isCloudflareAccessUrl(value: String, hostname: String): Boolean = try {
         val uri = Uri.parse(value)
         val host = uri.host.orEmpty()
         val path = uri.path.orEmpty()
@@ -114,7 +114,7 @@ class CloudflareTunnelManager(
         false
     }
 
-    private fun sanitizeDiagnostic(line: String): String {
+    internal fun sanitizeDiagnostic(line: String): String {
         return line
             .replace(AUTH_URL, "[Cloudflare URL hidden]")
             .replace(Regex("(?i)Bearer\\s+[^\\s]+"), "Bearer [redacted]")

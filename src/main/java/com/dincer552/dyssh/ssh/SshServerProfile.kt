@@ -71,7 +71,7 @@ class SshServerProfileStore(context: Context) {
         return storage.storeEncryptedProfileData(encode(profiles)) && storage.deletePrivateKey(id)
     }
 
-    private fun encode(profiles: List<SshServerProfile>): ByteArray {
+    internal fun encode(profiles: List<SshServerProfile>): ByteArray {
         val array = JSONArray()
         profiles.forEach { profile ->
             array.put(

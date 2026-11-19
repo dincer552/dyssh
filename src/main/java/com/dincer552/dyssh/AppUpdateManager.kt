@@ -96,7 +96,7 @@ object AppUpdateManager {
         }
     }
 
-    private fun parseVersionCodeFromTag(tag: String): Int? {
+    internal fun parseVersionCodeFromTag(tag: String): Int? {
         // Expected tag format: v1.0.5 or v1.0.10 etc.
         return tag.substringAfterLast('.').toIntOrNull()
     }

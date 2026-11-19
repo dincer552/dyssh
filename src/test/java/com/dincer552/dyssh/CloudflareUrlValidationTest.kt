@@ -74,39 +74,4 @@ class CloudflareUrlValidationTest {
         val sanitized = sanitizeDiagnostic(longLine)
         assertTrue(sanitized.length <= 240)
     }
-
-    // Test implementations matching CloudflareTunnelManager.kt
-    companion object {
-        fun isCloudflareAccessUrl(value: String, hostname: String): Boolean {
-            return try {
-                // Simple URL parsing without Android Uri
-                if (!value.startsWith("https://")) return false
-                val withoutScheme = value.substringAfter("https://")
-                val hostEnd = withoutScheme.indexOf('/')
-                val host = if (hostEnd >= 0) withoutScheme.substring(0, hostEnd) else withoutScheme
-                val path = if (hostEnd >= 0) withoutScheme.substring(hostEnd) else "/"
-
-                val officialAccessHost = host == "cloudflareaccess.com" ||
-                    host.endsWith(".cloudflareaccess.com") ||
-                    host == "cloudflareaccess.org" ||
-                    host.endsWith(".cloudflareaccess.org")
-                val configuredTunnelAccessPath =
-                    host.equals(hostname, ignoreCase = true) &&
-                    path.startsWith("/cdn-cgi/access/")
-
-                officialAccessHost || configuredTunnelAccessPath
-            } catch (_: Exception) {
-                false
-            }
-        }
-
-        fun sanitizeDiagnostic(line: String): String {
-            val AUTH_URL = "https://\\S+".toRegex()
-            return line
-                .replace(AUTH_URL, "[Cloudflare URL hidden]")
-                .replace(Regex("(?i)Bearer\\s+[^\\s]+"), "Bearer [redacted]")
-                .replace(Regex("(?i)(token|secret|authorization|cookie)=?[^\\s]+"), "$1=[redacted]")
-                .take(240)
-        }
-    }
 }
