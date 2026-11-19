@@ -128,7 +128,7 @@ class CloudflareTunnelManager(
  * Validates whether [value] is a legitimate Cloudflare Access URL for this tunnel.
  * Accepts:
  *  - Official Cloudflare Access domains (cloudflareaccess.com / .org)
- *  - The configured tunnel hostname when the path is /cdn-cgi/access/*
+ *  - The configured tunnel hostname when the path is /cdn-cgi/access/...
  */
 internal fun isCloudflareAccessUrl(value: String, hostname: String): Boolean = try {
     val uri = java.net.URI(value)
