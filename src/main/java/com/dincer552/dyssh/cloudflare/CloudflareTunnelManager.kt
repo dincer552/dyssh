@@ -10,6 +10,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.regex.Pattern
 
 /**
  * Implements OpenSSH ProxyCommand using cloudflared's stdio.
@@ -43,7 +44,7 @@ class CloudflareTunnelManager(
     }
 
     @Synchronized
-    private fun start(hostname: String) {
+    fun start(hostname: String) {
         stop()
         val binary = packagedExecutable(Constants.CLOUDFLARED_LIB_NAME)
         val home = File(appContext.filesDir, "cloudflared-home")
@@ -76,6 +77,9 @@ class CloudflareTunnelManager(
         }
         return executable
     }
+    
+    private val AUTH_URL = Pattern.compile("https://\\S+").toRegex()
+    
     private fun readDiagnostics(child: Process, hostname: String) {
         stderrThread = Thread({
             try {
@@ -98,30 +102,6 @@ class CloudflareTunnelManager(
         }
     }
 
-    internal fun isCloudflareAccessUrl(value: String, hostname: String): Boolean = try {
-        val uri = Uri.parse(value)
-        val host = uri.host.orEmpty()
-        val path = uri.path.orEmpty()
-        val officialAccessHost = host == "cloudflareaccess.com" ||
-            host.endsWith(".cloudflareaccess.com") ||
-            host == "cloudflareaccess.org" ||
-            host.endsWith(".cloudflareaccess.org")
-        val configuredTunnelAccessPath =
-            host.equals(hostname, ignoreCase = true) &&
-                path.startsWith("/cdn-cgi/access/")
-        uri.scheme == "https" && (officialAccessHost || configuredTunnelAccessPath)
-    } catch (_: Exception) {
-        false
-    }
-
-    internal fun sanitizeDiagnostic(line: String): String {
-        return line
-            .replace(AUTH_URL, "[Cloudflare URL hidden]")
-            .replace(Regex("(?i)Bearer\\s+[^\\s]+"), "Bearer [redacted]")
-            .replace(Regex("(?i)(token|secret|authorization|cookie)=?[^\\s]+"), "$1=[redacted]")
-            .take(240)
-    }
-
     private inner class CloudflareStdioProxy : Proxy {
         override fun connect(socket_factory: SocketFactory?, host: String, port: Int, timeout: Int) {
             start(host)
@@ -142,8 +122,37 @@ class CloudflareTunnelManager(
 
         override fun close() = stop()
     }
+}
 
-    companion object {
-        private val AUTH_URL = Regex("""https://\S+""")
-    }
+/**
+ * Validates whether [value] is a legitimate Cloudflare Access URL for this tunnel.
+ * Accepts:
+ *  - Official Cloudflare Access domains (cloudflareaccess.com / .org)
+ *  - The configured tunnel hostname when the path is /cdn-cgi/access/*
+ */
+internal fun isCloudflareAccessUrl(value: String, hostname: String): Boolean = try {
+    val uri = java.net.URI(value)
+    val host = uri.getHost()
+    val path = uri.getPath()
+    val officialAccessHost = host == "cloudflareaccess.com" ||
+        host.endsWith(".cloudflareaccess.com") ||
+        host == "cloudflareaccess.org" ||
+        host.endsWith(".cloudflareaccess.org")
+    val configuredTunnelAccessPath =
+        uri.getScheme == "https" &&
+        host?.equals(hostname, ignoreCase = true) == true &&
+        path != null && path.startsWith("/cdn-cgi/access/")
+    uri.getScheme == "https" && (officialAccessHost || configuredTunnelAccessPath)
+} catch (_: Exception) {
+    false
+}
+
+/** Strips auth URLs, bearer tokens, and secret/token/cookie fields, then truncates to 240 chars. */
+internal fun sanitizeDiagnostic(line: String): String {
+    val AUTH_URL = Pattern.compile("https://\\S+").toRegex()
+    return line
+        .replace(AUTH_URL, "[Cloudflare URL hidden]")
+        .replace(Pattern.compile("(?i)Bearer\\s+[^\\s]+").toRegex(), "Bearer [redacted]")
+        .replace(Pattern.compile("(?i)(token|secret|authorization|cookie)=?[^\\s]+").toRegex(), "$1=[redacted]")
+        .take(240)
 }

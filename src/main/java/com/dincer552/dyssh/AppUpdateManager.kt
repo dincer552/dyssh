@@ -96,11 +96,6 @@ object AppUpdateManager {
         }
     }
 
-    internal fun parseVersionCodeFromTag(tag: String): Int? {
-        // Expected tag format: v1.0.5 or v1.0.10 etc.
-        return tag.substringAfterLast('.').toIntOrNull()
-    }
-
     fun enqueueDownload(context: Context, update: ReleaseUpdate): Long {
         val request = DownloadManager.Request(Uri.parse(update.apkUrl))
             .setTitle("DYSSH update")
@@ -320,3 +315,7 @@ object AppUpdateManager {
         computed?.equals(expectedSha256, ignoreCase = true) == true
     }
 }
+
+/** Extracts the version code integer from a GitHub release tag (e.g. "v1.0.5" -> 5). */
+internal fun parseVersionCodeFromTag(tag: String): Int? =
+    tag.substringAfterLast('.').toIntOrNull()
