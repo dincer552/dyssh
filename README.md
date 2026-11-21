@@ -1,13 +1,13 @@
 # DYSSH for Android
 
-A standalone Android SSH client, separated from My App Store.
+A standalone Android SSH client, distributed through GitHub Releases and My App Store.
 
 ## Package identity
 
 - Application ID: `com.dincer552.dyssh`
 - Release APK asset: `dyssh.apk`
 - Distribution: GitHub Releases; My App Store reads this repository from its app catalog.
-- Signing: use the same persistent JKS signing identity for every DYSSH update.
+- Signing: central HTTPS APK signer using the existing DYSSH JKS identity. Reuse the same JKS and alias for every update.
 
 ## Features
 
@@ -17,18 +17,20 @@ A standalone Android SSH client, separated from My App Store.
 - SSH terminal UI based on Termux terminal-view
 - Cloudflare Access SSH through the bundled ARM64 cloudflared binary
 - Server status screen
-- GitHub Release self-update as a fallback; My App Store can also install/update DYSSH
+- GitHub Release self-update; My App Store can also install/update DYSSH
 
-## Build
+## Build and release
 
-GitHub Actions builds the ARM64 cloudflared binary and the SSH PTY bridge, then builds and tests the Android APK.
+GitHub Actions builds the ARM64 cloudflared binary and SSH PTY bridge, runs unit tests, builds the release APK, and sends it to the central signing service using a short-lived GitHub OIDC token.
 
-The workflow runs automatically on pushes to `main`. It can also be started manually from the repository's Actions tab using **DYSSH Android Build → Run workflow**.
+Configure the repository Actions variable `APK_SIGNING_SERVICE_URL` with the central signer's HTTPS URL. Do not add a JKS file or signing password to this repository.
 
-Configure these repository Actions secrets before expecting a signed release:
-- `ANDROID_KEYSTORE_BASE64`: base64 of the existing JKS signing keystore.
-- `ANDROID_KEYSTORE_PASSWORD`: keystore/key password for alias `hattrickssh`.
+The central signer must have a key registered with:
+- Key ID: `dyssh`
+- Package: `com.dincer552.dyssh`
+- Repository: `dincer552/dyssh`
+- JKS alias: `hattrickssh`
 
-Do not rotate the JKS signing key for subsequent updates. Android will reject an update signed by a different certificate.
+The registered JKS must be the original DYSSH signing identity. Never rotate the key: Android will reject updates signed by a different certificate.
 
-The workflow verifies the APK signature and package identity before publishing a release asset named exactly `dyssh.apk`, which the My App Store catalog expects.
+Only a verified signed APK is published as the `dyssh.apk` GitHub Release asset.
