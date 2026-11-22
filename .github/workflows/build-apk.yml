@@ -2,9 +2,9 @@ name: DYSSH Android Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build, centrally sign and publish DYSSH
+    name: Build, test and (main only) centrally sign DYSSH
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -47,58 +47,101 @@ jobs:
           packages: "platforms;android-36 build-tools;36.0.0 ndk;26.1.10909125"
 
       - name: Install native build tools
-        run: sudo apt-get update && sudo apt-get install -y git patch make
+        run: sudo apt-get update && sudo apt-get install -y git patch make binutils unzip
 
       - name: Build cloudflared for Android ARM64
         env:
           GOPROXY: "https://proxy.golang.org,direct"
         run: |
+          set -euo pipefail
           chmod +x scripts/build-cloudflared-android.sh
           scripts/build-cloudflared-android.sh
 
       - name: Build SSH terminal bridge for Android ARM64
         run: |
+          set -euo pipefail
           mkdir -p src/main/jniLibs/arm64-v8a
           NDK="$ANDROID_HOME/ndk/26.1.10909125"
           CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
-          "$CC" -O2 -Wall -Wextra -fPIE -pie -Wl,-z,max-page-size=16384 src/main/cpp/sshbridge.c -o src/main/jniLibs/arm64-v8a/libsshbridge.so
+          "$CC" -O2 -Wall -Wextra -fPIE -pie -Wl,-z,max-page-size=16384 \
+            src/main/cpp/sshbridge.c -o src/main/jniLibs/arm64-v8a/libsshbridge.so
           chmod 755 src/main/jniLibs/arm64-v8a/libsshbridge.so
           file src/main/jniLibs/arm64-v8a/libsshbridge.so
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Run unit tests and build debug/release validation APKs
+        run: |
+          set -euo pipefail
+          gradle --no-daemon \
+            -PappVersionCode="$APP_VERSION_CODE" \
+            -PappVersionName="$APP_VERSION_NAME" \
+            testDebugUnitTest assembleDebug assembleRelease
+
+      - name: Verify package identity, native payload and 16 KB ELF alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEBUG_APK="$(find build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          RELEASE_APK="$(find build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' ! -name 'dyssh.apk' -print -quit)"
+          test -s "$DEBUG_APK"
+          test -s "$RELEASE_APK"
+
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$DEBUG_APK" \
+            | grep -F "package: name='com.dincer552.dyssh.debug' versionCode='$APP_VERSION_CODE'"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RELEASE_APK" \
+            | grep -F "package: name='com.dincer552.dyssh' versionCode='$APP_VERSION_CODE'"
+
+          mkdir -p "$RUNNER_TEMP/dyssh-native-check"
+          for LIB in libcloudflared.so libsshbridge.so; do
+            unzip -p "$RELEASE_APK" "lib/arm64-v8a/$LIB" > "$RUNNER_TEMP/dyssh-native-check/$LIB"
+            test -s "$RUNNER_TEMP/dyssh-native-check/$LIB"
+            file "$RUNNER_TEMP/dyssh-native-check/$LIB"
+            readelf -h "$RUNNER_TEMP/dyssh-native-check/$LIB" | grep -q 'AArch64'
+            readelf -lW "$RUNNER_TEMP/dyssh-native-check/$LIB" > "$RUNNER_TEMP/dyssh-native-check/$LIB.program-headers"
+            python3 - "$RUNNER_TEMP/dyssh-native-check/$LIB.program-headers" "$LIB" <<'PY'
+          import re, sys
+          path, name = sys.argv[1:3]
+          text = open(path, encoding="utf-8").read()
+          aligns = []
+          for line in text.splitlines():
+              if re.match(r"^\s*LOAD\s", line):
+                  match = re.search(r"(0x[0-9a-fA-F]+)\s*$", line)
+                  if match:
+                      aligns.append(int(match.group(1), 16))
+          if not aligns:
+              raise SystemExit(f"No PT_LOAD alignment values found for {name}")
+          bad = [value for value in aligns if value < 0x4000]
+          if bad:
+              raise SystemExit(f"{name} has PT_LOAD alignment below 16 KB: {bad}")
+          print(f"{name}: PT_LOAD alignment is 16 KB compatible ({aligns})")
+          PY
+          done
+
+          echo "RELEASE_VALIDATION_APK=$RELEASE_APK" >> "$GITHUB_ENV"
+          echo "DYSSH debug/release package IDs, ARM64 native payload and 16 KB ELF alignment verified."
+
+      - name: Upload debug APK for manual device testing
+        uses: actions/upload-artifact@v4
         with:
-          gradle-version: "8.11.1"
-
-      - name: Run unit tests
-        run: |
-          gradle --no-daemon -PappVersionCode="$APP_VERSION_CODE" -PappVersionName="$APP_VERSION_NAME" testDebugUnitTest
-
-      - name: Build unsigned release APK
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        run: |
-          gradle --no-daemon -PappVersionCode="$APP_VERSION_CODE" -PappVersionName="$APP_VERSION_NAME" assembleRelease
-          APK="$(find build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          test -n "$APK" && test -s "$APK"
-          echo "UNSIGNED_APK=$APK" >> "$GITHUB_ENV"
+          name: dyssh-debug-apk-${{ env.APP_VERSION_NAME }}
+          path: build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Validate central signing endpoint
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "$APK_SIGNING_SERVICE_URL" ]; then
-            echo "::error::Set repository Actions variable APK_SIGNING_SERVICE_URL to the central signer HTTPS URL."
-            exit 1
-          fi
+          test -n "$APK_SIGNING_SERVICE_URL"
           HEALTH_URL="${APK_SIGNING_SERVICE_URL%/}/health"
-          curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$HEALTH_URL" -o "$RUNNER_TEMP/signer-health.json"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+            "$HEALTH_URL" -o "$RUNNER_TEMP/signer-health.json"
           grep -q '"ok":true' "$RUNNER_TEMP/signer-health.json"
           grep -q '"oidc":true' "$RUNNER_TEMP/signer-health.json"
 
       - name: Obtain short-lived GitHub OIDC token
         id: oidc
-        if: env.UNSIGNED_APK != ''
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         run: |
           set -euo pipefail
@@ -110,7 +153,8 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
-      - name: Sign DYSSH APK with central signer
+      - name: Sign with the existing DYSSH key (no key creation or rotation)
+        id: sign
         if: steps.oidc.outcome == 'success'
         env:
           SIGNING_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
@@ -118,21 +162,74 @@ jobs:
         run: |
           set -euo pipefail
           SIGNER_URL="${APK_SIGNING_SERVICE_URL%/}"
-          curl --fail-with-body --silent --show-error \
+          HTTP_CODE="$(curl --silent --show-error --max-time 180 \
             -X POST "$SIGNER_URL/v1/sign" \
             -H "Authorization: Bearer $SIGNING_OIDC_TOKEN" \
             -F "key_id=dyssh" \
-            -F "apk=@$UNSIGNED_APK;type=application/vnd.android.package-archive" \
-            -o "$RUNNER_TEMP/dyssh-signed.apk"
-          test -s "$RUNNER_TEMP/dyssh-signed.apk"
+            -F "apk=@$RELEASE_VALIDATION_APK;type=application/vnd.android.package-archive" \
+            -o "$RUNNER_TEMP/dyssh-sign-response.bin" \
+            -w "%{http_code}")"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Central signer rejected DYSSH (HTTP $HTTP_CODE). Response detail:"
+            cat "$RUNNER_TEMP/dyssh-sign-response.bin"
+            echo
+            echo "Do not create or rotate a key. Check the existing dyssh profile's repository binding and package name."
+            exit 1
+          fi
+          test -s "$RUNNER_TEMP/dyssh-sign-response.bin"
+          mv "$RUNNER_TEMP/dyssh-sign-response.bin" "$RUNNER_TEMP/dyssh-signed.apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$RUNNER_TEMP/dyssh-signed.apk"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RUNNER_TEMP/dyssh-signed.apk" | grep -F "package: name='com.dincer552.dyssh' versionCode='$APP_VERSION_CODE'"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RUNNER_TEMP/dyssh-signed.apk" \
+            | grep -F "package: name='com.dincer552.dyssh' versionCode='$APP_VERSION_CODE'"
           mkdir -p build/outputs/apk/release
           cp "$RUNNER_TEMP/dyssh-signed.apk" build/outputs/apk/release/dyssh.apk
           echo "RELEASE_APK=build/outputs/apk/release/dyssh.apk" >> "$GITHUB_ENV"
 
-      - name: Publish signed DYSSH Release
+      - name: Verify signing certificate continuity
         if: env.RELEASE_APK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_CERT="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$RELEASE_APK" \
+            | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+          test -n "$CURRENT_CERT"
+          LATEST_JSON="$RUNNER_TEMP/dyssh-latest-release.json"
+          PREVIOUS_APK_URL="$(curl --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'User-Agent: DYSSH-Android-CI' \
+            https://api.github.com/repos/dincer552/dyssh/releases/latest \
+            -o "$LATEST_JSON" -w '%{http_code}' || true)"
+          PREVIOUS_ASSET="$(python3 - "$LATEST_JSON" "$PREVIOUS_APK_URL" <<'PY'
+          import json, sys
+          path, status = sys.argv[1:3]
+          if status != "200":
+              print("")
+              raise SystemExit(0)
+          try:
+              release = json.load(open(path, encoding="utf-8"))
+              asset = next((a for a in release.get("assets", []) if a.get("name") == "dyssh.apk"), None)
+              print(asset.get("browser_download_url", "") if asset else "")
+          except Exception:
+              print("")
+          PY
+          )"
+          if [ -n "$PREVIOUS_ASSET" ]; then
+            curl --fail --silent --show-error --location "$PREVIOUS_ASSET" -o "$RUNNER_TEMP/dyssh-previous.apk"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$RUNNER_TEMP/dyssh-previous.apk"
+            PREVIOUS_CERT="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$RUNNER_TEMP/dyssh-previous.apk" \
+              | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+            if [ "$CURRENT_CERT" != "$PREVIOUS_CERT" ]; then
+              echo "::error::DYSSH signing certificate changed; refusing to publish an incompatible update."
+              exit 1
+            fi
+            echo "DYSSH signing certificate matches the previous release: $CURRENT_CERT"
+          else
+            echo "First DYSSH release certificate baseline: $CURRENT_CERT"
+          fi
+          echo "DYSSH signing certificate SHA-256: $CURRENT_CERT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish signed DYSSH Release
+        if: env.RELEASE_APK != '' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.APP_VERSION_NAME }}
@@ -140,8 +237,7 @@ jobs:
           target_commitish: main
           make_latest: true
           generate_release_notes: true
-          files: |
-            build/outputs/apk/release/dyssh.apk
+          files: build/outputs/apk/release/dyssh.apk
           fail_on_unmatched_files: true
 
       - name: Upload signed APK artifact
