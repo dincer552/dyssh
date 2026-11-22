@@ -191,29 +191,6 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
-      - name: Register DYSSH repository with the existing signer profile
-        env:
-          SIGNING_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          SIGNER_URL="${APK_SIGNING_SERVICE_URL%/}"
-          HTTP_CODE="$(curl --silent --show-error --max-time 60 \\
-            -X POST "$SIGNER_URL/v1/bootstrap" \\
-            -H "Authorization: Bearer $SIGNING_OIDC_TOKEN" \\
-            -F "key_id=dyssh" \\
-            -F "package_name=com.dincer552.dyssh" \\
-            -o "$RUNNER_TEMP/dyssh-bootstrap-response.json" \\
-            -w "%{http_code}")"
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "::error::DYSSH signer profile bootstrap/authorization failed (HTTP $HTTP_CODE). Response detail:"
-            cat "$RUNNER_TEMP/dyssh-bootstrap-response.json"
-            echo
-            echo "The server must already contain the original dyssh JKS profile bound to dincer552/dyssh and com.dincer552.dyssh. No key is created or rotated by this workflow."
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/dyssh-bootstrap-response.json"
-
       - name: Sign with the existing DYSSH key (no key creation or rotation)
         env:
           SIGNING_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
