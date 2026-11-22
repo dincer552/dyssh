@@ -114,6 +114,7 @@ object AppUpdateManager {
      * Copies the provider URI into a bounded cache file and validates content digest (when
      * provided), exact Android package/version and the signing certificate before installer UI.
      */
+    @Suppress("DEPRECATION")
     fun verifyDownloadedApk(context: Context, uri: Uri, update: ReleaseUpdate): Result<Unit> = runCatching {
         val temp = File.createTempFile("dyssh-update-", ".apk", context.cacheDir)
         try {
@@ -144,7 +145,6 @@ object AppUpdateManager {
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 PackageManager.GET_SIGNING_CERTIFICATES
             } else {
-                @Suppress("DEPRECATION")
                 PackageManager.GET_SIGNATURES
             }
             val archive = context.packageManager.getPackageArchiveInfo(temp.absolutePath, flags)
@@ -168,20 +168,20 @@ object AppUpdateManager {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun packageVersionCode(info: PackageInfo): Long {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             info.longVersionCode
         } else {
-            @Suppress("DEPRECATION")
             info.versionCode.toLong()
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun signerFingerprints(info: PackageInfo): Set<String> {
         val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             info.signingInfo?.apkContentsSigners
         } else {
-            @Suppress("DEPRECATION")
             info.signatures
         } ?: return emptySet()
         return signatures.map { signature ->
