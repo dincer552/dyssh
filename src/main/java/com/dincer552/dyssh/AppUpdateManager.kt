@@ -50,7 +50,7 @@ object AppUpdateManager {
             when (val status = connection.responseCode) {
                 HttpURLConnection.HTTP_NOT_FOUND -> return@withContext null
                 in 200..299 -> Unit
-                HttpURLConnection.HTTP_FORBIDDEN, HttpURLConnection.HTTP_TOO_MANY_REQUESTS ->
+                HttpURLConnection.HTTP_FORBIDDEN, 429 ->
                     throw IOException("GitHub güncelleme sınırına ulaşıldı (HTTP $status). Daha sonra tekrar deneyin.")
                 else -> throw IOException("GitHub güncelleme sunucusu HTTP $status döndürdü.")
             }
