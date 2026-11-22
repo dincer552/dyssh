@@ -79,3 +79,6 @@ Live SSH and Cloudflare Access sessions require a reachable test server and the 
 The GitHub Actions workflow installs Java 17, Go 1.27.3, Android SDK 36, build-tools 36.0.0, and NDK 26.1.10909125. The native build script pins the cloudflared release and applies the checked-in Android patches.
 
 Never commit passwords, private keys, OIDC tokens, signer admin tokens, JKS files or signing passwords.
+## My App Store publication check
+
+The store catalog entry is already configured in `dincer552/socialworst/app-catalog.json` with package `com.dincer552.dyssh`, repository `dincer552/dyssh` and asset `dyssh.apk`. A catalog entry alone is not an installable listing: the repository must have a published GitHub Release containing the signed `dyssh.apk` asset. Until that exists, the store correctly shows the app as waiting for a release. Publish only the APK signed by the existing DYSSH certificate; never upload the debug or unsigned validation APK.
