@@ -191,6 +191,31 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
+      - name: Create or confirm the DYSSH signing profile
+        env:
+          SIGNING_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIGNER_URL="${APK_SIGNING_SERVICE_URL%/}"
+          RESPONSE_FILE="$RUNNER_TEMP/dyssh-bootstrap-response.json"
+          HTTP_CODE="$(curl --silent --show-error --max-time 60 \
+            -X POST "$SIGNER_URL/v1/bootstrap" \
+            -H "Authorization: Bearer $SIGNING_OIDC_TOKEN" \
+            -F "key_id=dyssh" \
+            -F "package_name=com.dincer552.dyssh" \
+            -o "$RESPONSE_FILE" \
+            -w "%{http_code}")"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::DYSSH signing profile bootstrap failed (HTTP $HTTP_CODE). Response detail:"
+            cat "$RESPONSE_FILE"
+            echo
+            echo "Existing keys are never replaced. If the response is repository_requires_admin_binding, link dincer552/dyssh to the existing dyssh key from My App Store."
+            exit 1
+          fi
+          cat "$RESPONSE_FILE"
+          echo "DYSSH signing profile is ready; an existing key was confirmed or the first key was created."
+
       - name: Sign with the existing DYSSH key (no key creation or rotation)
         env:
           SIGNING_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
