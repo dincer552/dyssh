@@ -37,8 +37,8 @@ android {
         }
         release {
             isMinifyEnabled = false
+            // Production release is signed by the central OIDC signer. Never fall back to a debug key.
             if (!signingStorePath.isNullOrBlank()) signingConfig = signingConfigs.getByName("releaseKey")
-            else signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
