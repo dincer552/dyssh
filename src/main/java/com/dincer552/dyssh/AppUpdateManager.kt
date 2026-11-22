@@ -168,8 +168,14 @@ object AppUpdateManager {
         }
     }
 
-    private fun packageVersionCode(info: PackageInfo): Long =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+    private fun packageVersionCode(info: PackageInfo): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+    }
 
     private fun signerFingerprints(info: PackageInfo): Set<String> {
         val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
