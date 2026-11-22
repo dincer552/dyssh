@@ -3,6 +3,7 @@ package com.dincer552.dyssh
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.DownloadManager
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -251,15 +252,25 @@ private fun MainScreen(
             when (snapshot.status) {
                 DownloadManager.STATUS_SUCCESSFUL -> {
                     val uri = withContext(Dispatchers.IO) { AppUpdateManager.getDownloadedUri(context, id) }
+                    val update = githubUpdate
                     downloadId = null
-                    if (uri == null) updateError = "İndirilen APK bulunamadı."
-                    else {
-                        pendingInstallUri = uri
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                            !context.packageManager.canRequestPackageInstalls()
-                        ) installPermissionLauncher.launch(
-                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
-                        ) else openApkInstaller(context, uri)
+                    if (uri == null || update == null) {
+                        updateError = "İndirilen APK veya sürüm bilgisi bulunamadı."
+                    } else {
+                        val verification = withContext(Dispatchers.IO) {
+                            AppUpdateManager.verifyDownloadedApk(context, uri, update)
+                        }
+                        if (verification.isFailure) {
+                            updateError = verification.exceptionOrNull()?.message
+                                ?: "İndirilen APK doğrulanamadı."
+                        } else {
+                            pendingInstallUri = uri
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                !context.packageManager.canRequestPackageInstalls()
+                            ) installPermissionLauncher.launch(
+                                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                            ) else openApkInstaller(context, uri)
+                        }
                     }
                     break
                 }
@@ -384,7 +395,19 @@ private fun MainScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("GÜNCELLEMEYİ TEKRAR DENE") }
             }
-            if (downloadId != null) LinearProgressIndicator({ downloadPercent / 100f }, Modifier.fillMaxWidth())
+            if (downloadId != null) {
+                LinearProgressIndicator({ downloadPercent / 100f }, Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = {
+                        downloadId?.let { id ->
+                            AppUpdateManager.cancelDownload(context, id)
+                            downloadId = null
+                            downloadPercent = 0
+                            updateError = "Güncelleme indirmesi iptal edildi."
+                        }
+                    }) { Text("İNDİRMEYİ İPTAL ET", fontSize = 10.sp) }
+                }
+            }
             updateError?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 11.sp) }
             Text("Parolalar ve profiller cihazda şifreli saklanır. Private key GitHub'a gönderilmez.", color = AppMuted, fontSize = 10.sp)
         }
@@ -534,9 +557,33 @@ private fun ProfileEditor(
 
 private fun openApkInstaller(context: android.content.Context, apkUri: Uri) {
     val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
-        data = apkUri
+        setDataAndType(apkUri, "application/vnd.android.package-archive")
+        clipData = ClipData.newUri(context.contentResolver, "DYSSH update", apkUri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
     }
-    context.startActivity(intent)
+    try {
+        context.startActivity(intent)
+    } catch (_: android.content.ActivityNotFoundException) {
+        val fallback = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            clipData = ClipData.newUri(context.contentResolver, "DYSSH update", apkUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            context.startActivity(fallback)
+        } catch (error: Exception) {
+            Toast.makeText(
+                context,
+                error.message ?: "Android APK kurulum ekranı açılamadı.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    } catch (error: Exception) {
+        Toast.makeText(
+            context,
+            error.message ?: "Android APK kurulum ekranı açılamadı.",
+            Toast.LENGTH_LONG
+        ).show()
+    }
 }
