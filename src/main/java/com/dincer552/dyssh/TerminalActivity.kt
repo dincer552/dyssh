@@ -35,8 +35,11 @@ class TerminalActivity : ComponentActivity(), SshConnectionManager.SshCallback {
     private lateinit var terminalView: TerminalView
     private lateinit var statusView: TextView
     private lateinit var diagnosticView: TextView
+    private lateinit var diagnosticScroll: android.widget.ScrollView
+    private lateinit var diagnosticToggle: Button
     private val diagnosticLines = ArrayDeque<String>()
-    private var terminalFontSize = 20f
+    private var diagnosticsVisible = true
+    private var terminalFontSize = 24f
     private var terminalSession: TerminalSession? = null
     private var localServer: ServerSocket? = null
     private var tearingDown = false
@@ -138,8 +141,37 @@ class TerminalActivity : ComponentActivity(), SshConnectionManager.SshCallback {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(android.graphics.Color.BLACK)
         }
-        terminalFontSize = getSharedPreferences("terminal_display", MODE_PRIVATE)
-            .getFloat("font_size", 20f).coerceIn(14f, 30f)
+        val displayPreferences = getSharedPreferences("terminal_display", MODE_PRIVATE)
+        val wasFontSizeScaled = displayPreferences.getBoolean("font_size_scaled_120", false)
+        val storedFontSize = displayPreferences.getFloat("font_size", 20f)
+        terminalFontSize = if (wasFontSizeScaled) storedFontSize else (storedFontSize * 1.2f)
+            .coerceIn(14f, 36f)
+        displayPreferences.edit()
+            .putFloat("font_size", terminalFontSize)
+            .putBoolean("font_size_scaled_120", true)
+            .apply()
+
+        diagnosticsVisible = displayPreferences.getBoolean("diagnostics_visible", true)
+
+        val diagnosticHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(8), 0)
+            setBackgroundColor(android.graphics.Color.rgb(18, 25, 23))
+        }
+        diagnosticHeader.addView(TextView(this).apply {
+            text = "Bağlantı Günlüğü"
+            textSize = 11f
+            setTextColor(android.graphics.Color.WHITE)
+        }, LinearLayout.LayoutParams(0, dp(34), 1f))
+        diagnosticToggle = Button(this).apply {
+            textSize = 9f
+            minWidth = dp(62)
+            setPadding(dp(4), 0, dp(4), 0)
+            setOnClickListener { setDiagnosticsVisible(!diagnosticsVisible) }
+        }
+        diagnosticHeader.addView(diagnosticToggle, LinearLayout.LayoutParams(dp(62), dp(32)))
+        terminalArea.addView(diagnosticHeader)
 
         diagnosticView = TextView(this).apply {
             text = "SSH Client tanı günlüğü\nBağlantı başlatılıyor…"
@@ -150,7 +182,7 @@ class TerminalActivity : ComponentActivity(), SshConnectionManager.SshCallback {
             setLineSpacing(dp(2).toFloat(), 1.0f)
             setTextIsSelectable(true)
         }
-        val diagnosticScroll = android.widget.ScrollView(this).apply {
+        diagnosticScroll = android.widget.ScrollView(this).apply {
             setBackgroundColor(android.graphics.Color.rgb(8, 12, 10))
             addView(diagnosticView)
         }
@@ -158,6 +190,7 @@ class TerminalActivity : ComponentActivity(), SshConnectionManager.SshCallback {
             diagnosticScroll,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(116))
         )
+        updateDiagnosticsVisibility()
         terminalView = TerminalView(this, null).apply {
             setBackgroundColor(android.graphics.Color.BLACK)
             setTextSize(terminalFontSize.toInt())
@@ -222,6 +255,23 @@ class TerminalActivity : ComponentActivity(), SshConnectionManager.SshCallback {
         )
         params.marginEnd = dp(3)
         parent.addView(button, params)
+    }
+
+    private fun setDiagnosticsVisible(visible: Boolean) {
+        diagnosticsVisible = visible
+        getSharedPreferences("terminal_display", MODE_PRIVATE)
+            .edit().putBoolean("diagnostics_visible", visible).apply()
+        updateDiagnosticsVisibility()
+    }
+
+    private fun updateDiagnosticsVisibility() {
+        diagnosticScroll.visibility = if (diagnosticsVisible) android.view.View.VISIBLE else android.view.View.GONE
+        diagnosticToggle.text = if (diagnosticsVisible) "◉  LOG" else "◎  LOG"
+        diagnosticToggle.contentDescription = if (diagnosticsVisible) {
+            "Bağlantı günlüğünü gizle"
+        } else {
+            "Bağlantı günlüğünü göster"
+        }
     }
 
     private fun changeTerminalFontSize(delta: Float) {
