@@ -43,7 +43,7 @@ private data class AzureAccount(
     val subscription: String, val resourceGroup: String, val vmName: String,
     val resourceIds: List<String>, val refreshToken: String = ""
 )
-private data class CostData(val currency: String, val total: Double, val estimate: Double, val days: List<Pair<String, Double>>)
+private data class CostData(val currency: String, val currentMonth: Double, val previousMonth: Double)
 
 class AzureCostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,7 +85,7 @@ private fun CostScreen(openUrl: (String) -> Unit) {
                 val updated = a.copy(refreshToken = refresh)
                 save(updated); code = null
                 status = "Azure hesabı bağlandı; maliyet sorgulanıyor…"
-                result = withContext(Dispatchers.IO) { AzureApi.monthToDate(updated) }
+                result = withContext(Dispatchers.IO) { AzureApi.getSummary(updated) }
                 status = "Azure Cost Management verisi alındı."
             } catch (e: Exception) { error = e.message ?: "Azure bağlantı hatası"; status = "Bağlantı başarısız." }
             finally { busy = false }
@@ -95,7 +95,7 @@ private fun CostScreen(openUrl: (String) -> Unit) {
         if (busy) return
         busy = true; error = null
         scope.launch {
-            try { result = withContext(Dispatchers.IO) { AzureApi.monthToDate(a) }; status = "Maliyet güncellendi." }
+            try { result = withContext(Dispatchers.IO) { AzureApi.getSummary(a) }; status = "Maliyet güncellendi." }
             catch (e: Exception) { error = e.message ?: "Maliyet alınamadı." }
             finally { busy = false }
         }
@@ -132,15 +132,14 @@ private fun CostScreen(openUrl: (String) -> Unit) {
                 }
             }
             result?.let { d ->
-                Card(colors = CardDefaults.cardColors(containerColor = CostPanel)) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text("BU AY ŞU ANA KADAR", color = CostMuted, fontSize = 10.sp)
-                        Text(money(d.total, d.currency), color = CostGreen, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                        Text("Ay sonu tahmini: " + money(d.estimate, d.currency), color = Color.White)
-                        Text("Tahmin, bugüne kadarki günlük ortalamanın ay sonuna uzatılmasıdır; Azure resmi tahmini değildir.", color = CostMuted, fontSize = 10.sp)
-                        Text("GÜNLÜK MALİYET", color = CostMuted, fontSize = 10.sp)
-                        d.days.takeLast(12).forEach { p -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(p.first, color = CostMuted, fontSize = 11.sp); Text(money(p.second, d.currency), color = Color.White, fontSize = 11.sp) } }
-                        Text("Azure maliyet verileri gecikmeli güncellenebilir.", color = CostMuted, fontSize = 10.sp)
+                Card(colors = CardDefaults.cardColors(containerColor = CostPanel), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("BU AYIN MEVCUT MALİYETİ", color = CostMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(money(d.currentMonth, d.currency), color = CostGreen, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                        Divider(color = Color(0xFF293541))
+                        Text("GEÇEN AYIN MALİYETİ", color = CostMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(money(d.previousMonth, d.currency), color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Tutarlar seçtiğin VM ve eklediğin kaynakların Azure maliyet kayıtlarıdır. Faturaya yansıyan kesin borç, vergi ve ödeme düzeltmeleri nedeniyle farklı olabilir.", color = CostMuted, fontSize = 10.sp)
                     }
                 }
             }
@@ -220,39 +219,42 @@ private object AzureApi {
         throw IllegalStateException("Microsoft cihaz kodu zaman aşımına uğradı.")
     }
     private fun token(a: AzureAccount): String = postForm("https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/token", mapOf("client_id" to a.client, "grant_type" to "refresh_token", "refresh_token" to a.refreshToken, "scope" to SCOPE)).getString("access_token")
-    fun monthToDate(a: AzureAccount): CostData {
+    fun getSummary(a: AzureAccount): CostData {
+        val bearer = token(a)
+        val current = queryCost(a, bearer, "MonthToDate")
+        val previous = queryCost(a, bearer, "PreviousMonth")
+        val currency = current.second.ifBlank { previous.second.ifBlank { "USD" } }
+        return CostData(currency, current.first, previous.first)
+    }
+    private fun queryCost(a: AzureAccount, bearer: String, timeframe: String): Pair<Double, String> {
         val filter = JSONObject().put("dimensions", JSONObject().put("name", "ResourceId").put("operator", "In").put("values", JSONArray(a.resourceIds)))
-        val body = JSONObject().put("type", "ActualCost").put("timeframe", "MonthToDate").put("dataset", JSONObject()
-            .put("granularity", "Daily")
-            .put("aggregation", JSONObject().put("totalCost", JSONObject().put("name", "PreTaxCost").put("function", "Sum")))
-            .put("grouping", JSONArray().put(JSONObject().put("type", "Dimension").put("name", "ResourceId")))
-            .put("filter", filter))
+        val body = JSONObject().put("type", "ActualCost").put("timeframe", timeframe)
+            .put("dataset", JSONObject()
+                .put("aggregation", JSONObject().put("totalCost", JSONObject().put("name", "PreTaxCost").put("function", "Sum")))
+                .put("filter", filter))
         val c = URL("https://management.azure.com/subscriptions/" + a.subscription + "/providers/Microsoft.CostManagement/query?api-version=2023-11-01").openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.connectTimeout = 15000; c.readTimeout = 60000; c.doOutput = true
-        c.setRequestProperty("Authorization", "Bearer " + token(a)); c.setRequestProperty("Content-Type", "application/json")
+        c.setRequestProperty("Authorization", "Bearer " + bearer); c.setRequestProperty("Content-Type", "application/json")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         val status = c.responseCode
         val text = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (status !in 200..299) throw IllegalStateException(azureError(text, status))
         val props = JSONObject(text).getJSONObject("properties")
         val cols = props.getJSONArray("columns"); val rows = props.optJSONArray("rows") ?: JSONArray()
-        var costCol = 0; var dateCol = -1; var currencyCol = -1
+        var costCol = -1; var currencyCol = -1
         for (i in 0 until cols.length()) {
             val n = cols.getJSONObject(i).optString("name")
-            if (n.equals("PreTaxCost", true)) costCol = i
-            if (n.equals("UsageDate", true)) dateCol = i
+            if (n.equals("PreTaxCost", true) || n.equals("totalCost", true)) costCol = i
             if (n.equals("Currency", true)) currencyCol = i
         }
-        var total = 0.0; var currency = "USD"; val days = linkedMapOf<String, Double>()
+        if (costCol < 0) throw IllegalStateException("Azure maliyet yanıtında tutar alanı bulunamadı.")
+        var total = 0.0; var currency = "USD"
         for (i in 0 until rows.length()) {
-            val row = rows.getJSONArray(i); val amount = row.optDouble(costCol, 0.0); total += amount
-            val raw = if (dateCol >= 0) row.optString(dateCol) else "Unknown"
-            val day = if (raw.length >= 8) raw.substring(0,4) + "-" + raw.substring(4,6) + "-" + raw.substring(6,8) else raw
-            days[day] = (days[day] ?: 0.0) + amount
+            val row = rows.getJSONArray(i)
+            total += row.optDouble(costCol, 0.0)
             if (currencyCol >= 0) currency = row.optString(currencyCol, currency)
         }
-        val now = java.time.LocalDate.now()
-        return CostData(currency, total, total / now.dayOfMonth * now.lengthOfMonth(), days.entries.map { it.key to it.value }.sortedBy { it.first })
+        return total to currency
     }
     private fun azureError(body: String, status: Int): String {
         val json = runCatching { JSONObject(body) }.getOrNull()
