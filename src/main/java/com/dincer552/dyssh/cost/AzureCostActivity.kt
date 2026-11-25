@@ -255,8 +255,14 @@ private object AzureApi {
         return CostData(currency, total, total / now.dayOfMonth * now.lengthOfMonth(), days.entries.map { it.key to it.value }.sortedBy { it.first })
     }
     private fun azureError(body: String, status: Int): String {
-        val detail = runCatching { JSONObject(body).getJSONObject("error").optString("message") }.getOrNull().orEmpty()
-        return if (detail.isBlank()) "Azure API HTTP " + status else "Azure API HTTP " + status + ": " + detail
+        val json = runCatching { JSONObject(body) }.getOrNull()
+        val errorValue = json?.opt("error")
+        val code = if (errorValue is String) errorValue else (errorValue as? JSONObject)?.optString("code").orEmpty()
+        val detail = json?.optString("error_description").orEmpty().ifBlank {
+            (errorValue as? JSONObject)?.optString("message").orEmpty()
+        }
+        val parts = listOf(code, detail).filter { it.isNotBlank() }.distinct()
+        return "Azure API HTTP " + status + if (parts.isEmpty()) "" else ": " + parts.joinToString(" — ")
     }
 }
 
