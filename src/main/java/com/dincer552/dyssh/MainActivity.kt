@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
+import com.dincer552.dyssh.cost.AzureCostActivity
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -299,6 +300,7 @@ private fun MainScreen(
                     Text("Sunucularınız", color = AppMuted, fontSize = 12.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { startActivity(Intent(context, AzureCostActivity::class.java)) }) { Text("MALİYET") }
                     OutlinedButton(onClick = { showSettings = true }) { Text("AYARLAR") }
                     OutlinedButton(onClick = { editingProfile = null; showEditor = true }) { Text("+ SUNUCU") }
                 }
