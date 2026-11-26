@@ -26,6 +26,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".VmStatusActivity" android:exported="false" />
+        <activity android:name=".cost.AzureCostActivity" android:exported="false" />
         <activity
             android:name=".TerminalActivity"
             android:exported="false"

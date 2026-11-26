@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
+import com.dincer552.dyssh.cost.AzureCostActivity
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -43,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -178,6 +180,9 @@ private fun MainScreen(
     var downloadPercent by remember { mutableIntStateOf(0) }
     var pendingInstallUri by remember { mutableStateOf<Uri?>(null) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    val displayPreferences = remember { context.getSharedPreferences("terminal_display", android.content.Context.MODE_PRIVATE) }
+    var selectedTerminalFontSize by remember { mutableFloatStateOf(displayPreferences.getFloat("font_size", 24f).coerceIn(12f, 40f)) }
     val updateScope = rememberCoroutineScope()
     val checkGitHubUpdates: () -> Unit = {
         if (!BuildConfig.DEBUG && !BuildConfig.PLAY_DISTRIBUTION && !isCheckingUpdate) {
@@ -294,7 +299,11 @@ private fun MainScreen(
                     Text("DYSSH", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Text("Sunucularınız", color = AppMuted, fontSize = 12.sp)
                 }
-                OutlinedButton(onClick = { editingProfile = null; showEditor = true }) { Text("+ SUNUCU") }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { context.startActivity(Intent(context, AzureCostActivity::class.java)) }) { Text("MALİYET", fontSize = 10.sp) }
+                    TextButton(onClick = { showSettings = true }) { Text("AYARLAR", fontSize = 10.sp) }
+                    OutlinedButton(onClick = { editingProfile = null; showEditor = true }) { Text("+ SUNUCU", fontSize = 10.sp) }
+                }
             }
 
             OutlinedButton(
@@ -411,6 +420,41 @@ private fun MainScreen(
             updateError?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 11.sp) }
             Text("Parolalar ve profiller cihazda şifreli saklanır. Private key GitHub'a gönderilmez.", color = AppMuted, fontSize = 10.sp)
         }
+    }
+
+    if (showSettings) {
+        AlertDialog(
+            onDismissRequest = { showSettings = false },
+            title = { Text("Görüntü ayarları") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Terminal yazı boyutu", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("${selectedTerminalFontSize.toInt()} sp", color = AppGreen, fontSize = 18.sp)
+                    Slider(
+                        value = selectedTerminalFontSize,
+                        onValueChange = { selectedTerminalFontSize = it },
+                        valueRange = 12f..40f,
+                        steps = 27
+                    )
+                    Text("Önizleme: azureuser@hattrick-vm:~$", color = Color.White, fontSize = selectedTerminalFontSize.sp)
+                    Text("Değişiklik yeni terminal bağlantılarında uygulanır. Terminaldeki A− / A+ tuşlarıyla da anlık ayarlayabilirsin.", color = AppMuted, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    displayPreferences.edit().putFloat("font_size", selectedTerminalFontSize).apply()
+                    showSettings = false
+                    Toast.makeText(context, "Terminal yazı boyutu kaydedildi.", Toast.LENGTH_SHORT).show()
+                }) { Text("KAYDET") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    selectedTerminalFontSize = displayPreferences.getFloat("font_size", 24f).coerceIn(12f, 40f)
+                    showSettings = false
+                }) { Text("İPTAL") }
+            },
+            containerColor = AppPanel
+        )
     }
 
     if (showEditor) {

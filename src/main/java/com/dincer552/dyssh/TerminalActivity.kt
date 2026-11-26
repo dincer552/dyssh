@@ -142,15 +142,7 @@ class TerminalActivity : ComponentActivity(), SshConnectionManager.SshCallback {
             setBackgroundColor(android.graphics.Color.BLACK)
         }
         val displayPreferences = getSharedPreferences("terminal_display", MODE_PRIVATE)
-        val wasFontSizeScaledAgain = displayPreferences.getBoolean("font_size_scaled_144", false)
-        val storedFontSize = displayPreferences.getFloat("font_size", 20f)
-        terminalFontSize = (if (wasFontSizeScaledAgain) storedFontSize else storedFontSize * 1.2f)
-            .coerceIn(14f, 36f)
-        displayPreferences.edit()
-            .putFloat("font_size", terminalFontSize)
-            .putBoolean("font_size_scaled_120", true)
-            .putBoolean("font_size_scaled_144", true)
-            .apply()
+        terminalFontSize = displayPreferences.getFloat("font_size", 24f).coerceIn(12f, 40f)
 
         diagnosticsVisible = displayPreferences.getBoolean("diagnostics_visible", true)
 
@@ -276,7 +268,7 @@ class TerminalActivity : ComponentActivity(), SshConnectionManager.SshCallback {
     }
 
     private fun changeTerminalFontSize(delta: Float) {
-        terminalFontSize = (terminalFontSize + delta).coerceIn(14f, 36f)
+        terminalFontSize = (terminalFontSize + delta).coerceIn(12f, 40f)
         terminalView.setTextSize(terminalFontSize.toInt())
         getSharedPreferences("terminal_display", MODE_PRIVATE)
             .edit().putFloat("font_size", terminalFontSize).apply()
