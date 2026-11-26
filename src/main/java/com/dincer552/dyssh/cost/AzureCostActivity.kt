@@ -296,16 +296,18 @@ private object AzureStore {
     fun load(c: Context): List<AzureAccount> = runCatching {
         val encoded = c.getSharedPreferences(PREF, 0).getString("data", null) ?: return emptyList()
         val arr = JSONArray(AzureCipher.decrypt(encoded))
-        (0 until arr.length()).map { i ->
+        val loaded = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i); val ids = o.getJSONArray("resourceIds")
             AzureAccount(
                 o.getString("id"), o.getString("name"), o.getString("tenant"), o.getString("client"),
                 o.getString("subscription"), o.getString("resourceGroup"), o.getString("vmName"),
-                (0 until ids.length()).map { ids.getString(it) }, o.optString("refreshToken"),
+                (0 until ids.length()).map { ids.getString(it) }, "",
                 o.optString("msalAccountId"), o.optString("msalUsername")
             )
         }
-    }.getOrDefault(emptyList())
+        // Remove legacy app-managed refresh tokens from the old device-code implementation.
+        if (loaded.any { it.refreshToken.isNotBlank() }) save(c, loaded)
+        loaded
     fun save(c: Context, list: List<AzureAccount>) {
         val arr = JSONArray()
         list.forEach { a -> arr.put(JSONObject().put("id", a.id).put("name", a.name).put("tenant", a.tenant).put("client", a.client).put("subscription", a.subscription).put("resourceGroup", a.resourceGroup).put("vmName", a.vmName).put("resourceIds", JSONArray(a.resourceIds)).put("refreshToken", "").put("msalAccountId", a.msalAccountId).put("msalUsername", a.msalUsername)) }
