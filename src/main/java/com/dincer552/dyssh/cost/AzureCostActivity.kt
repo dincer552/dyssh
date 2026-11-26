@@ -1,6 +1,9 @@
 package com.dincer552.dyssh.cost
 
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.widget.Toast
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -133,7 +136,16 @@ private fun CostScreen(openUrl: (String) -> Unit) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(status, color = Color.White, fontSize = 12.sp)
                     if (code != null) {
-                        Text("Giriş kodu: " + code, color = CostGreen, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text("Giriş kodu: " + code, color = CostGreen, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            OutlinedButton(onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Azure giriş kodu", code))
+                                Toast.makeText(context, "Giriş kodu kopyalandı", Toast.LENGTH_SHORT).show()
+                            }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
+                                Text("KOPYALA", fontSize = 11.sp)
+                            }
+                        }
                         Text(verifyUrl, color = CostMuted, fontSize = 11.sp)
                         OutlinedButton(onClick = { openUrl(verifyUrl) }) { Text("MICROSOFT GİRİŞİNİ AÇ") }
                     }
