@@ -85,7 +85,9 @@ private fun CostScreen(openUrl: (String) -> Unit) {
                 val updated = a.copy(refreshToken = refresh)
                 save(updated); code = null
                 status = "Azure hesabı bağlandı; maliyet sorgulanıyor…"
-                result = withContext(Dispatchers.IO) { AzureApi.getSummary(updated) }
+                val summary = withContext(Dispatchers.IO) { AzureApi.getSummary(updated) }
+                save(updated.copy(refreshToken = summary.second))
+                result = summary.first
                 status = "Azure Cost Management verisi alındı."
             } catch (e: Exception) { error = e.message ?: "Azure bağlantı hatası"; status = "Bağlantı başarısız." }
             finally { busy = false }
@@ -95,8 +97,14 @@ private fun CostScreen(openUrl: (String) -> Unit) {
         if (busy) return
         busy = true; error = null
         scope.launch {
-            try { result = withContext(Dispatchers.IO) { AzureApi.getSummary(a) }; status = "Maliyet güncellendi." }
-            catch (e: Exception) { error = e.message ?: "Maliyet alınamadı." }
+            try {
+                val summary = withContext(Dispatchers.IO) { AzureApi.getSummary(a) }
+                save(a.copy(refreshToken = summary.second))
+                result = summary.first
+                status = "Maliyet güncellendi."
+            } catch (e: Exception) {
+                error = e.message ?: "Maliyet alınamadı."
+            }
             finally { busy = false }
         }
     }
@@ -115,7 +123,10 @@ private fun CostScreen(openUrl: (String) -> Unit) {
                 }
             }
         }
-        if (accounts.isEmpty()) Button(onClick = { editing = null; showEditor = true }) { Text("AZURE HESABI EKLE") }
+        if (accounts.isEmpty()) {
+            Text("Azure bağlantısı için hesabın hazırlandı. Bilgileri kontrol edip kaydetmen yeterli.", color = CostMuted, fontSize = 11.sp)
+            Button(onClick = { editing = null; showEditor = true }) { Text("HAZIR AZURE HESABINI EKLE") }
+        }
         selected?.let { a ->
             Card(colors = CardDefaults.cardColors(containerColor = CostPanel)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -152,13 +163,13 @@ private fun CostScreen(openUrl: (String) -> Unit) {
 
 @Composable
 private fun AccountEditor(initial: AzureAccount?, dismiss: () -> Unit, save: (AzureAccount) -> Unit) {
-    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
-    var tenant by remember(initial?.id) { mutableStateOf(initial?.tenant ?: "") }
-    var client by remember(initial?.id) { mutableStateOf(initial?.client ?: "") }
-    var subscription by remember(initial?.id) { mutableStateOf(initial?.subscription ?: "") }
-    var group by remember(initial?.id) { mutableStateOf(initial?.resourceGroup ?: "") }
-    var vm by remember(initial?.id) { mutableStateOf(initial?.vmName ?: "") }
-    var ids by remember(initial?.id) { mutableStateOf(initial?.resourceIds?.joinToString("\n") ?: "") }
+    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "Azure - UK South") }
+    var tenant by remember(initial?.id) { mutableStateOf(initial?.tenant ?: "59c6ec38-fc8e-43e1-ac46-f849530b2fed") }
+    var client by remember(initial?.id) { mutableStateOf(initial?.client ?: "821c50df-c62c-430e-8691-10d0f005d2b6") }
+    var subscription by remember(initial?.id) { mutableStateOf(initial?.subscription ?: "b85ee923-e4da-43d4-a18b-71ba91dc0f23") }
+    var group by remember(initial?.id) { mutableStateOf(initial?.resourceGroup ?: "HATTRICK-RG") }
+    var vm by remember(initial?.id) { mutableStateOf(initial?.vmName ?: "hattrick-vm-uks") }
+    var ids by remember(initial?.id) { mutableStateOf(initial?.resourceIds?.joinToString("\n") ?: "/subscriptions/b85ee923-e4da-43d4-a18b-71ba91dc0f23/resourceGroups/HATTRICK-RG/providers/Microsoft.Compute/virtualMachines/hattrick-vm-uks") }
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = dismiss, title = { Text(if (initial == null) "Azure hesabı ekle" else "Azure hesabını düzenle") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -218,13 +229,21 @@ private object AzureApi {
         }
         throw IllegalStateException("Microsoft cihaz kodu zaman aşımına uğradı.")
     }
-    private fun token(a: AzureAccount): String = postForm("https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/token", mapOf("client_id" to a.client, "grant_type" to "refresh_token", "refresh_token" to a.refreshToken, "scope" to SCOPE)).getString("access_token")
-    fun getSummary(a: AzureAccount): CostData {
-        val bearer = token(a)
-        val current = queryCost(a, bearer, "MonthToDate")
-        val previous = queryCost(a, bearer, "PreviousMonth")
-        val currency = current.second.ifBlank { previous.second.ifBlank { "USD" } }
-        return CostData(currency, current.first, previous.first)
+    private data class TokenResult(val accessToken: String, val refreshToken: String)
+    private fun token(a: AzureAccount): TokenResult {
+        val response = postForm(
+            "https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/token",
+            mapOf("client_id" to a.client, "grant_type" to "refresh_token", "refresh_token" to a.refreshToken, "scope" to SCOPE)
+        )
+        return TokenResult(response.getString("access_token"), response.optString("refresh_token").ifBlank { a.refreshToken })
+    }
+    fun getSummary(a: AzureAccount): Pair<CostData, String> {
+        val token = token(a)
+        val current = queryCost(a, token.accessToken, "MonthToDate")
+        val previous = queryCost(a, token.accessToken, "PreviousMonth")
+        val currency = current.second.ifBlank { previous.second }
+        if (currency.isBlank()) throw IllegalStateException("Azure maliyet yanıtında para birimi bulunamadı.")
+        return CostData(currency, current.first, previous.first) to token.refreshToken
     }
     private fun queryCost(a: AzureAccount, bearer: String, timeframe: String): Pair<Double, String> {
         val filter = JSONObject().put("dimensions", JSONObject().put("name", "ResourceId").put("operator", "In").put("values", JSONArray(a.resourceIds)))
