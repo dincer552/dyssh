@@ -35,6 +35,7 @@ private val CostBg = Color(0xFF080D12)
 private val CostPanel = Color(0xFF121B24)
 private val CostGreen = Color(0xFF38D98A)
 private val CostMuted = Color(0xFF91A1B2)
+internal const val DYSSH_AZURE_CLIENT_ID = "821c50df-c62c-430e-8691-10d0f005d2b6"
 
 private data class AzureAccount(
     val id: String, val name: String, val tenant: String, val client: String,
@@ -200,7 +201,7 @@ private fun CostScreen() {
 private fun AccountEditor(initial: AzureAccount?, dismiss: () -> Unit, save: (AzureAccount) -> Unit) {
     var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "Azure - UK South") }
     var tenant by remember(initial?.id) { mutableStateOf(initial?.tenant ?: "59c6ec38-fc8e-43e1-ac46-f849530b2fed") }
-    var client by remember(initial?.id) { mutableStateOf(initial?.client ?: "821c50df-c62c-430e-8691-10d0f005d2b6") }
+    var client by remember(initial?.id) { mutableStateOf(DYSSH_AZURE_CLIENT_ID) }
     var subscription by remember(initial?.id) { mutableStateOf(initial?.subscription ?: "b85ee923-e4da-43d4-a18b-71ba91dc0f23") }
     var group by remember(initial?.id) { mutableStateOf(initial?.resourceGroup ?: "HATTRICK-RG") }
     var vm by remember(initial?.id) { mutableStateOf(initial?.vmName ?: "hattrick-vm-uks") }
@@ -210,7 +211,7 @@ private fun AccountEditor(initial: AzureAccount?, dismiss: () -> Unit, save: (Az
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text("Hesap adı") }, singleLine = true)
             OutlinedTextField(tenant, { tenant = it.trim() }, label = { Text("Tenant ID") }, singleLine = true)
-            OutlinedTextField(client, { client = it.trim() }, label = { Text("Client ID (Public client)") }, singleLine = true)
+            OutlinedTextField(client, {}, label = { Text("Microsoft uygulama kimliği") }, singleLine = true, readOnly = true)
             OutlinedTextField(subscription, { subscription = it.trim() }, label = { Text("Subscription ID") }, singleLine = true)
             OutlinedTextField(group, { group = it }, label = { Text("Resource Group") }, singleLine = true)
             OutlinedTextField(vm, { vm = it }, label = { Text("VM adı") }, singleLine = true)
@@ -222,6 +223,7 @@ private fun AccountEditor(initial: AzureAccount?, dismiss: () -> Unit, save: (Az
             val resourceIds = ids.lines().map { it.trim() }.filter { it.startsWith("/subscriptions/", true) }.distinct()
             error = when {
                 listOf(name, tenant, client, subscription, group, vm).any { it.isBlank() } -> "Tüm alanlar zorunlu."
+                !client.equals(DYSSH_AZURE_CLIENT_ID, ignoreCase = true) -> "Bu uygulama yalnızca kayıtlı DYSSH Microsoft kimliğini kullanabilir."
                 resourceIds.isEmpty() -> "En az bir tam Resource ID gir."
                 resourceIds.any { !it.contains("/subscriptions/" + subscription + "/", true) } -> "Resource ID farklı aboneliğe ait."
                 else -> null
