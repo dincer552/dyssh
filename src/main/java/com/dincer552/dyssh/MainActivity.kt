@@ -300,9 +300,9 @@ private fun MainScreen(
                     Text("Sunucularınız", color = AppMuted, fontSize = 12.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { startActivity(Intent(context, AzureCostActivity::class.java)) }) { Text("MALİYET") }
-                    OutlinedButton(onClick = { showSettings = true }) { Text("AYARLAR") }
-                    OutlinedButton(onClick = { editingProfile = null; showEditor = true }) { Text("+ SUNUCU") }
+                    TextButton(onClick = { context.startActivity(Intent(context, AzureCostActivity::class.java)) }) { Text("MALİYET", fontSize = 10.sp) }
+                    TextButton(onClick = { showSettings = true }) { Text("AYARLAR", fontSize = 10.sp) }
+                    OutlinedButton(onClick = { editingProfile = null; showEditor = true }) { Text("+ SUNUCU", fontSize = 10.sp) }
                 }
             }
 
