@@ -1,11 +1,7 @@
 package com.dincer552.dyssh.cost
 
+import android.app.Activity
 import android.content.Context
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.widget.Toast
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -28,7 +24,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.text.NumberFormat
 import java.util.Locale
 import javax.crypto.Cipher
@@ -44,19 +39,22 @@ private val CostMuted = Color(0xFF91A1B2)
 private data class AzureAccount(
     val id: String, val name: String, val tenant: String, val client: String,
     val subscription: String, val resourceGroup: String, val vmName: String,
-    val resourceIds: List<String>, val refreshToken: String = ""
+    val resourceIds: List<String>,
+    val refreshToken: String = "",
+    val msalAccountId: String = "",
+    val msalUsername: String = ""
 )
 private data class CostData(val currency: String, val currentMonth: Double, val previousMonth: Double)
 
 class AzureCostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme(colorScheme = darkColorScheme(primary = CostGreen, background = CostBg, surface = CostPanel)) { CostScreen { url -> runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } } } }
+        setContent { MaterialTheme(colorScheme = darkColorScheme(primary = CostGreen, background = CostBg, surface = CostPanel)) { CostScreen() } }
     }
 }
 
 @Composable
-private fun CostScreen(openUrl: (String) -> Unit) {
+private fun CostScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var accounts by remember { mutableStateOf(AzureStore.load(context)) }
@@ -64,8 +62,6 @@ private fun CostScreen(openUrl: (String) -> Unit) {
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<AzureAccount?>(null) }
     var status by remember { mutableStateOf("Azure hesabı ekleyin.") }
-    var code by remember { mutableStateOf<String?>(null) }
-    var verifyUrl by remember { mutableStateOf("https://microsoft.com/devicelogin") }
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<CostData?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -77,39 +73,72 @@ private fun CostScreen(openUrl: (String) -> Unit) {
         AzureStore.save(context, accounts)
     }
     fun connect(a: AzureAccount) {
-        busy = true; error = null; status = "Microsoft cihaz kodu alınıyor…"
+        if (busy) return
+        val hostActivity = context as? Activity
+        if (hostActivity == null) {
+            error = "Microsoft girişini başlatmak için etkin uygulama ekranı bulunamadı."
+            return
+        }
+        busy = true
+        error = null
+        result = null
+        status = "Microsoft güvenli tarayıcı oturumu başlatılıyor…"
         scope.launch {
             try {
-                val dc = withContext(Dispatchers.IO) { AzureApi.deviceCode(a) }
-                code = dc.userCode
-                verifyUrl = dc.verificationUri
-                status = "Microsoft girişini tamamla. Kod: " + dc.userCode
-                openUrl(dc.verificationUri)
-                val refresh = AzureApi.poll(a, dc)
-                val updated = a.copy(refreshToken = refresh)
-                save(updated); code = null
-                status = "Azure hesabı bağlandı; maliyet sorgulanıyor…"
-                val summary = withContext(Dispatchers.IO) { AzureApi.getSummary(updated) }
-                save(updated.copy(refreshToken = summary.second))
-                result = summary.first
+                val auth = AzureMsalAuth(context).acquireInteractive(hostActivity, a.tenant)
+                val authenticated = a.copy(
+                    refreshToken = "",
+                    msalAccountId = auth.accountId,
+                    msalUsername = auth.username
+                )
+                save(authenticated)
+                status = "Microsoft hesabı doğrulandı; Azure maliyeti sorgulanıyor…"
+                val summary = withContext(Dispatchers.IO) {
+                    AzureApi.getSummary(authenticated, auth.accessToken)
+                }
+                result = summary
                 status = "Azure Cost Management verisi alındı."
-            } catch (e: Exception) { error = e.message ?: "Azure bağlantı hatası"; status = "Bağlantı başarısız." }
-            finally { busy = false }
+            } catch (e: Exception) {
+                error = e.message ?: "Microsoft/Azure bağlantı hatası."
+                status = "Bağlantı başarısız."
+            } finally {
+                busy = false
+            }
         }
     }
+
     fun refresh(a: AzureAccount) {
         if (busy) return
-        busy = true; error = null
+        if (a.msalAccountId.isBlank()) {
+            error = "Önce Microsoft hesabını bağla."
+            return
+        }
+        busy = true
+        error = null
         scope.launch {
             try {
-                val summary = withContext(Dispatchers.IO) { AzureApi.getSummary(a) }
-                save(a.copy(refreshToken = summary.second))
-                result = summary.first
+                val auth = AzureMsalAuth(context).acquireSilent(
+                    a.tenant, a.msalAccountId, a.msalUsername
+                )
+                val summary = withContext(Dispatchers.IO) {
+                    AzureApi.getSummary(a, auth.accessToken)
+                }
+                save(a.copy(
+                    refreshToken = "",
+                    msalAccountId = auth.accountId,
+                    msalUsername = auth.username
+                ))
+                result = summary
                 status = "Maliyet güncellendi."
             } catch (e: Exception) {
                 error = e.message ?: "Maliyet alınamadı."
+                if (error.orEmpty().contains("interaction_required", ignoreCase = true) ||
+                    error.orEmpty().contains("ui_required", ignoreCase = true)) {
+                    error = error + " Yeniden bağlan düğmesiyle oturumu yenile."
+                }
+            } finally {
+                busy = false
             }
-            finally { busy = false }
         }
     }
 
@@ -135,23 +164,16 @@ private fun CostScreen(openUrl: (String) -> Unit) {
             Card(colors = CardDefaults.cardColors(containerColor = CostPanel)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(status, color = Color.White, fontSize = 12.sp)
-                    if (code != null) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Text("Giriş kodu: " + code, color = CostGreen, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            OutlinedButton(onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("Azure giriş kodu", code))
-                                Toast.makeText(context, "Giriş kodu kopyalandı", Toast.LENGTH_SHORT).show()
-                            }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
-                                Text("KOPYALA", fontSize = 11.sp)
-                            }
-                        }
-                        Text(verifyUrl, color = CostMuted, fontSize = 11.sp)
-                        OutlinedButton(onClick = { openUrl(verifyUrl) }) { Text("MICROSOFT GİRİŞİNİ AÇ") }
+                    if (a.msalUsername.isNotBlank()) {
+                        Text("Microsoft hesabı: " + a.msalUsername, color = CostMuted, fontSize = 11.sp)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { connect(a) }, enabled = !busy) { Text(if (a.refreshToken.isBlank()) "AZURE'A BAĞLAN" else "YENİDEN BAĞLAN") }
-                        OutlinedButton(onClick = { refresh(a) }, enabled = !busy && a.refreshToken.isNotBlank()) { Text("YENİLE") }
+                        Button(onClick = { connect(a) }, enabled = !busy) {
+                            Text(if (a.msalAccountId.isBlank()) "MICROSOFT İLE BAĞLAN" else "HESABI DEĞİŞTİR")
+                        }
+                        OutlinedButton(onClick = { refresh(a) }, enabled = !busy && a.msalAccountId.isNotBlank()) {
+                            Text("YENİLE")
+                        }
                     }
                 }
             }
@@ -169,7 +191,7 @@ private fun CostScreen(openUrl: (String) -> Unit) {
             }
         }
         error?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 11.sp) }
-        Text("Azure'da abonelik kapsamına Cost Management Reader rolü verilmeli. Refresh token Android Keystore ile şifrelenir; client secret APK'ya konmaz.", color = CostMuted, fontSize = 10.sp)
+        Text("Azure aboneliğinde Cost Management Reader rolü gerekli. Microsoft oturum belirteçleri MSAL'in güvenli yerel önbelleğinde yönetilir; uygulamada client secret veya elle saklanan refresh token bulunmaz.", color = CostMuted, fontSize = 10.sp)
     }
     if (showEditor) AccountEditor(editing, { showEditor = false }, { save(it); showEditor = false })
 }
@@ -204,94 +226,19 @@ private fun AccountEditor(initial: AzureAccount?, dismiss: () -> Unit, save: (Az
                 resourceIds.any { !it.contains("/subscriptions/" + subscription + "/", true) } -> "Resource ID farklı aboneliğe ait."
                 else -> null
             }
-            if (error == null) save(AzureAccount(initial?.id ?: java.util.UUID.randomUUID().toString(), name.trim(), tenant, client, subscription, group.trim(), vm.trim(), resourceIds, initial?.refreshToken ?: ""))
+            if (error == null) save(AzureAccount(initial?.id ?: java.util.UUID.randomUUID().toString(), name.trim(), tenant, client, subscription, group.trim(), vm.trim(), resourceIds, initial?.refreshToken ?: "", initial?.msalAccountId.orEmpty(), initial?.msalUsername.orEmpty()))
         }) { Text("KAYDET") } },
         dismissButton = { TextButton(onClick = dismiss) { Text("İPTAL") } }, containerColor = CostPanel)
 }
 
 private object AzureApi {
-    private const val SCOPE = "https://management.azure.com/user_impersonation offline_access"
-    private fun postForm(url: String, fields: Map<String, String>): JSONObject {
-        val body = fields.entries.joinToString("&") { URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8") }.toByteArray()
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.requestMethod = "POST"; c.connectTimeout = 15000; c.readTimeout = 30000; c.doOutput = true
-        c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-        c.outputStream.use { it.write(body) }
-        val status = c.responseCode
-        val text = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (status !in 200..299) throw IllegalStateException(azureError(text, status))
-        return JSONObject(text)
-    }
-    data class DeviceCode(
-        val userCode: String,
-        val verificationUri: String,
-        val deviceCode: String,
-        val intervalSeconds: Int,
-        val expiresInSeconds: Int
-    )
-    fun deviceCode(a: AzureAccount): DeviceCode {
-        val j = postForm(
-            "https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/devicecode",
-            mapOf("client_id" to a.client, "scope" to SCOPE)
-        )
-        return DeviceCode(
-            userCode = j.getString("user_code"),
-            verificationUri = j.optString("verification_uri", "https://microsoft.com/devicelogin"),
-            deviceCode = j.getString("device_code"),
-            intervalSeconds = j.optInt("interval", 5).coerceAtLeast(1),
-            expiresInSeconds = j.optInt("expires_in", 900).coerceAtLeast(1)
-        )
-    }
-    suspend fun poll(a: AzureAccount, device: DeviceCode): String {
-        val until = System.currentTimeMillis() + device.expiresInSeconds * 1000L
-        var intervalSeconds = device.intervalSeconds
-        while (System.currentTimeMillis() < until) {
-            delay(intervalSeconds * 1000L)
-            try {
-                val j = withContext(Dispatchers.IO) {
-                    postForm(
-                        "https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/token",
-                        mapOf(
-                            "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
-                            "client_id" to a.client,
-                            "device_code" to device.deviceCode
-                        )
-                    )
-                }
-                return j.getString("refresh_token")
-            } catch (e: Exception) {
-                val m = e.message.orEmpty()
-                when {
-                    m.contains("authorization_pending", ignoreCase = true) -> continue
-                    m.contains("slow_down", ignoreCase = true) -> {
-                        intervalSeconds += 5
-                        continue
-                    }
-                    m.contains("authorization_declined", ignoreCase = true) ->
-                        throw IllegalStateException("Microsoft giriş isteğini reddettin.")
-                    m.contains("expired_token", ignoreCase = true) ->
-                        throw IllegalStateException("Cihaz kodunun süresi doldu. Yeniden bağlan.")
-                    else -> throw e
-                }
-            }
-        }
-        throw IllegalStateException("Microsoft cihaz kodunun süresi doldu. Yeniden bağlan.")
-    }
-    private data class TokenResult(val accessToken: String, val refreshToken: String)
-    private fun token(a: AzureAccount): TokenResult {
-        val response = postForm(
-            "https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/token",
-            mapOf("client_id" to a.client, "grant_type" to "refresh_token", "refresh_token" to a.refreshToken, "scope" to SCOPE)
-        )
-        return TokenResult(response.getString("access_token"), response.optString("refresh_token").ifBlank { a.refreshToken })
-    }
-    fun getSummary(a: AzureAccount): Pair<CostData, String> {
-        val token = token(a)
-        val current = queryCost(a, token.accessToken, "MonthToDate")
-        val previous = queryCost(a, token.accessToken, "TheLastMonth")
+    fun getSummary(a: AzureAccount, accessToken: String): CostData {
+        val current = queryCost(a, accessToken, "MonthToDate")
+        val previous = queryCost(a, accessToken, "TheLastMonth")
         val currency = current.second.ifBlank { previous.second }
-        return CostData(currency, current.first, previous.first) to token.refreshToken
+        return CostData(currency, current.first, previous.first)
     }
+
     private fun queryCost(a: AzureAccount, bearer: String, timeframe: String): Pair<Double, String> {
         val filter = JSONObject().put("dimensions", JSONObject().put("name", "ResourceId").put("operator", "In").put("values", JSONArray(a.resourceIds)))
         val body = JSONObject().put("type", "ActualCost").put("timeframe", timeframe)
@@ -299,23 +246,30 @@ private object AzureApi {
                 .put("aggregation", JSONObject().put("totalCost", JSONObject().put("name", "PreTaxCost").put("function", "Sum")))
                 .put("filter", filter))
         val c = URL("https://management.azure.com/subscriptions/" + a.subscription + "/providers/Microsoft.CostManagement/query?api-version=2023-11-01").openConnection() as HttpURLConnection
-        c.requestMethod = "POST"; c.connectTimeout = 15000; c.readTimeout = 60000; c.doOutput = true
-        c.setRequestProperty("Authorization", "Bearer " + bearer); c.setRequestProperty("Content-Type", "application/json")
+        c.requestMethod = "POST"
+        c.connectTimeout = 15000
+        c.readTimeout = 60000
+        c.doOutput = true
+        c.setRequestProperty("Authorization", "Bearer " + bearer)
+        c.setRequestProperty("Content-Type", "application/json")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         val status = c.responseCode
         if (status == HttpURLConnection.HTTP_NO_CONTENT) return 0.0 to ""
         val text = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (status !in 200..299) throw IllegalStateException(azureError(text, status))
         val props = JSONObject(text).getJSONObject("properties")
-        val cols = props.getJSONArray("columns"); val rows = props.optJSONArray("rows") ?: JSONArray()
-        var costCol = -1; var currencyCol = -1
+        val cols = props.getJSONArray("columns")
+        val rows = props.optJSONArray("rows") ?: JSONArray()
+        var costCol = -1
+        var currencyCol = -1
         for (i in 0 until cols.length()) {
             val n = cols.getJSONObject(i).optString("name")
             if (n.equals("PreTaxCost", true) || n.equals("totalCost", true)) costCol = i
             if (n.equals("Currency", true)) currencyCol = i
         }
         if (costCol < 0) throw IllegalStateException("Azure maliyet yanıtında tutar alanı bulunamadı.")
-        var total = 0.0; var currency = ""
+        var total = 0.0
+        var currency = ""
         for (i in 0 until rows.length()) {
             val row = rows.getJSONArray(i)
             total += row.optDouble(costCol, 0.0)
@@ -323,6 +277,7 @@ private object AzureApi {
         }
         return total to currency
     }
+
     private fun azureError(body: String, status: Int): String {
         val json = runCatching { JSONObject(body) }.getOrNull()
         val errorValue = json?.opt("error")
@@ -334,7 +289,6 @@ private object AzureApi {
         return "Azure API HTTP " + status + if (parts.isEmpty()) "" else ": " + parts.joinToString(" — ")
     }
 }
-
 private object AzureStore {
     private const val PREF = "dyssh_azure_accounts"
     fun load(c: Context): List<AzureAccount> = runCatching {
@@ -342,12 +296,17 @@ private object AzureStore {
         val arr = JSONArray(AzureCipher.decrypt(encoded))
         (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i); val ids = o.getJSONArray("resourceIds")
-            AzureAccount(o.getString("id"), o.getString("name"), o.getString("tenant"), o.getString("client"), o.getString("subscription"), o.getString("resourceGroup"), o.getString("vmName"), (0 until ids.length()).map { ids.getString(it) }, o.optString("refreshToken"))
+            AzureAccount(
+                o.getString("id"), o.getString("name"), o.getString("tenant"), o.getString("client"),
+                o.getString("subscription"), o.getString("resourceGroup"), o.getString("vmName"),
+                (0 until ids.length()).map { ids.getString(it) }, o.optString("refreshToken"),
+                o.optString("msalAccountId"), o.optString("msalUsername")
+            )
         }
     }.getOrDefault(emptyList())
     fun save(c: Context, list: List<AzureAccount>) {
         val arr = JSONArray()
-        list.forEach { a -> arr.put(JSONObject().put("id", a.id).put("name", a.name).put("tenant", a.tenant).put("client", a.client).put("subscription", a.subscription).put("resourceGroup", a.resourceGroup).put("vmName", a.vmName).put("resourceIds", JSONArray(a.resourceIds)).put("refreshToken", a.refreshToken)) }
+        list.forEach { a -> arr.put(JSONObject().put("id", a.id).put("name", a.name).put("tenant", a.tenant).put("client", a.client).put("subscription", a.subscription).put("resourceGroup", a.resourceGroup).put("vmName", a.vmName).put("resourceIds", JSONArray(a.resourceIds)).put("refreshToken", "").put("msalAccountId", a.msalAccountId).put("msalUsername", a.msalUsername)) }
         c.getSharedPreferences(PREF, 0).edit().putString("data", AzureCipher.encrypt(arr.toString())).apply()
     }
 }
