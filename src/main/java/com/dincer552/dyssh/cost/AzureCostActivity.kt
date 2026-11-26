@@ -78,10 +78,11 @@ private fun CostScreen(openUrl: (String) -> Unit) {
         scope.launch {
             try {
                 val dc = withContext(Dispatchers.IO) { AzureApi.deviceCode(a) }
-                code = dc.first; verifyUrl = dc.second
-                status = "Microsoft girişini tamamla. Kod: " + dc.first
-                openUrl(dc.second)
-                val refresh = AzureApi.poll(a, dc.third)
+                code = dc.userCode
+                verifyUrl = dc.verificationUri
+                status = "Microsoft girişini tamamla. Kod: " + dc.userCode
+                openUrl(dc.verificationUri)
+                val refresh = AzureApi.poll(a, dc)
                 val updated = a.copy(refreshToken = refresh)
                 save(updated); code = null
                 status = "Azure hesabı bağlandı; maliyet sorgulanıyor…"
@@ -209,25 +210,60 @@ private object AzureApi {
         if (status !in 200..299) throw IllegalStateException(azureError(text, status))
         return JSONObject(text)
     }
-    fun deviceCode(a: AzureAccount): Triple<String, String, String> {
-        val j = postForm("https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/devicecode", mapOf("client_id" to a.client, "scope" to SCOPE))
-        return Triple(j.getString("user_code"), j.optString("verification_uri", "https://microsoft.com/devicelogin"), j.getString("device_code"))
+    private data class DeviceCode(
+        val userCode: String,
+        val verificationUri: String,
+        val deviceCode: String,
+        val intervalSeconds: Int,
+        val expiresInSeconds: Int
+    )
+    fun deviceCode(a: AzureAccount): DeviceCode {
+        val j = postForm(
+            "https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/devicecode",
+            mapOf("client_id" to a.client, "scope" to SCOPE)
+        )
+        return DeviceCode(
+            userCode = j.getString("user_code"),
+            verificationUri = j.optString("verification_uri", "https://microsoft.com/devicelogin"),
+            deviceCode = j.getString("device_code"),
+            intervalSeconds = j.optInt("interval", 5).coerceAtLeast(1),
+            expiresInSeconds = j.optInt("expires_in", 900).coerceAtLeast(1)
+        )
     }
-    suspend fun poll(a: AzureAccount, device: String): String {
-        val until = System.currentTimeMillis() + 900000
+    suspend fun poll(a: AzureAccount, device: DeviceCode): String {
+        val until = System.currentTimeMillis() + device.expiresInSeconds * 1000L
+        var intervalSeconds = device.intervalSeconds
         while (System.currentTimeMillis() < until) {
-            delay(5000)
+            delay(intervalSeconds * 1000L)
             try {
-                val j = withContext(Dispatchers.IO) { postForm("https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/token", mapOf("grant_type" to "urn:ietf:params:oauth:grant-type:device_code", "client_id" to a.client, "device_code" to device)) }
+                val j = withContext(Dispatchers.IO) {
+                    postForm(
+                        "https://login.microsoftonline.com/" + a.tenant + "/oauth2/v2.0/token",
+                        mapOf(
+                            "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
+                            "client_id" to a.client,
+                            "device_code" to device.deviceCode
+                        )
+                    )
+                }
                 return j.getString("refresh_token")
             } catch (e: Exception) {
                 val m = e.message.orEmpty()
-                if (m.contains("authorization_pending")) continue
-                if (m.contains("slow_down")) { delay(5000); continue }
-                throw e
+                when {
+                    m.contains("authorization_pending", ignoreCase = true) -> continue
+                    m.contains("slow_down", ignoreCase = true) -> {
+                        intervalSeconds += 5
+                        continue
+                    }
+                    m.contains("authorization_declined", ignoreCase = true) ->
+                        throw IllegalStateException("Microsoft giriş isteğini reddettin.")
+                    m.contains("expired_token", ignoreCase = true) ->
+                        throw IllegalStateException("Cihaz kodunun süresi doldu. Yeniden bağlan.")
+                    else -> throw e
+                }
             }
         }
-        throw IllegalStateException("Microsoft cihaz kodu zaman aşımına uğradı.")
+        throw IllegalStateException("Microsoft cihaz kodunun süresi doldu. Yeniden bağlan.")
     }
     private data class TokenResult(val accessToken: String, val refreshToken: String)
     private fun token(a: AzureAccount): TokenResult {
@@ -240,7 +276,7 @@ private object AzureApi {
     fun getSummary(a: AzureAccount): Pair<CostData, String> {
         val token = token(a)
         val current = queryCost(a, token.accessToken, "MonthToDate")
-        val previous = queryCost(a, token.accessToken, "PreviousMonth")
+        val previous = queryCost(a, token.accessToken, "TheLastMonth")
         val currency = current.second.ifBlank { previous.second }
         if (currency.isBlank()) throw IllegalStateException("Azure maliyet yanıtında para birimi bulunamadı.")
         return CostData(currency, current.first, previous.first) to token.refreshToken
