@@ -51,7 +51,7 @@ android {
     packaging {
         jniLibs { useLegacyPackaging = true }
         resources {
-            excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/DEPENDENCIES")
+            excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/DEPENDENCIES", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
         }
     }
 }
