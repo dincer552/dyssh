@@ -308,6 +308,7 @@ private object AzureStore {
         // Remove legacy app-managed refresh tokens from the old device-code implementation.
         if (loaded.any { it.refreshToken.isNotBlank() }) save(c, loaded)
         loaded
+    }.getOrDefault(emptyList())
     fun save(c: Context, list: List<AzureAccount>) {
         val arr = JSONArray()
         list.forEach { a -> arr.put(JSONObject().put("id", a.id).put("name", a.name).put("tenant", a.tenant).put("client", a.client).put("subscription", a.subscription).put("resourceGroup", a.resourceGroup).put("vmName", a.vmName).put("resourceIds", JSONArray(a.resourceIds)).put("refreshToken", "").put("msalAccountId", a.msalAccountId).put("msalUsername", a.msalUsername)) }
