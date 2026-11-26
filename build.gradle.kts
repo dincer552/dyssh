@@ -51,7 +51,7 @@ android {
     packaging {
         jniLibs { useLegacyPackaging = true }
         resources {
-            excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/DEPENDENCIES")
+            excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/DEPENDENCIES", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
         }
     }
 }
@@ -67,6 +67,7 @@ dependencies {
     implementation("com.google.android.play:app-update:2.1.0")
     implementation("com.github.mwiede:jsch:2.28.8")
     implementation("com.termux.termux-app:terminal-view:0.118.0")
+    implementation("com.microsoft.identity.client:msal:8.7.0")
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

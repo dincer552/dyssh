@@ -27,6 +27,19 @@
         </activity>
         <activity android:name=".VmStatusActivity" android:exported="false" />
         <activity android:name=".cost.AzureCostActivity" android:exported="false" />
+        <!-- MSAL system-browser callback for the registered mobile/desktop redirect URI. -->
+        <activity
+            android:name="com.microsoft.identity.client.BrowserTabActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="msal821c50df-c62c-430e-8691-10d0f005d2b6"
+                    android:host="auth" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".TerminalActivity"
             android:exported="false"
