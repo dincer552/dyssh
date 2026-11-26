@@ -1,5 +1,7 @@
 package com.dincer552.dyssh.cost
 
+import com.dincer552.dyssh.R
+
 import android.app.Activity
 import android.content.Context
 import com.microsoft.identity.client.AcquireTokenParameters
