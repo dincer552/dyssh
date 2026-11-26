@@ -278,7 +278,6 @@ private object AzureApi {
         val current = queryCost(a, token.accessToken, "MonthToDate")
         val previous = queryCost(a, token.accessToken, "TheLastMonth")
         val currency = current.second.ifBlank { previous.second }
-        if (currency.isBlank()) throw IllegalStateException("Azure maliyet yanıtında para birimi bulunamadı.")
         return CostData(currency, current.first, previous.first) to token.refreshToken
     }
     private fun queryCost(a: AzureAccount, bearer: String, timeframe: String): Pair<Double, String> {
@@ -292,6 +291,7 @@ private object AzureApi {
         c.setRequestProperty("Authorization", "Bearer " + bearer); c.setRequestProperty("Content-Type", "application/json")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         val status = c.responseCode
+        if (status == HttpURLConnection.HTTP_NO_CONTENT) return 0.0 to ""
         val text = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (status !in 200..299) throw IllegalStateException(azureError(text, status))
         val props = JSONObject(text).getJSONObject("properties")
@@ -303,7 +303,7 @@ private object AzureApi {
             if (n.equals("Currency", true)) currencyCol = i
         }
         if (costCol < 0) throw IllegalStateException("Azure maliyet yanıtında tutar alanı bulunamadı.")
-        var total = 0.0; var currency = "USD"
+        var total = 0.0; var currency = ""
         for (i in 0 until rows.length()) {
             val row = rows.getJSONArray(i)
             total += row.optDouble(costCol, 0.0)
@@ -351,4 +351,13 @@ private object AzureCipher {
     fun encrypt(s: String): String { val c = Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.ENCRYPT_MODE, key()); return Base64.encodeToString(c.iv + c.doFinal(s.toByteArray()), Base64.NO_WRAP) }
     fun decrypt(s: String): String { val b = Base64.decode(s, Base64.NO_WRAP); val c = Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, b.copyOfRange(0, 12))); return String(c.doFinal(b.copyOfRange(12, b.size))) }
 }
-private fun money(value: Double, currency: String): String = NumberFormat.getCurrencyInstance(Locale.getDefault()).apply { this.currency = runCatching { java.util.Currency.getInstance(currency) }.getOrNull() }.format(value)
+private fun money(value: Double, currency: String): String {
+    val formatter = if (currency.isBlank()) {
+        NumberFormat.getNumberInstance(Locale.getDefault())
+    } else {
+        val resolvedCurrency = runCatching { java.util.Currency.getInstance(currency) }.getOrNull()
+        if (resolvedCurrency == null) NumberFormat.getNumberInstance(Locale.getDefault())
+        else NumberFormat.getCurrencyInstance(Locale.getDefault()).apply { this.currency = resolvedCurrency }
+    }
+    return formatter.format(value)
+}
