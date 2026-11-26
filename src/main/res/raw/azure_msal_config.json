@@ -1,0 +1,22 @@
+{
+  "client_id": "821c50df-c62c-430e-8691-10d0f005d2b6",
+  "redirect_uri": "msal821c50df-c62c-430e-8691-10d0f005d2b6://auth",
+  "broker_redirect_uri_registered": false,
+  "authorization_user_agent": "BROWSER",
+  "account_mode": "MULTIPLE",
+  "authorities": [
+    {
+      "type": "AAD",
+      "audience": {
+        "type": "AzureADMyOrg",
+        "tenant_id": "59c6ec38-fc8e-43e1-ac46-f849530b2fed"
+      },
+      "default": true
+    }
+  ],
+  "logging": {
+    "pii_enabled": false,
+    "log_level": "WARNING",
+    "logcat_enabled": true
+  }
+}
