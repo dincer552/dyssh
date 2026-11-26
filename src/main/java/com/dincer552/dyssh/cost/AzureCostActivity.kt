@@ -210,7 +210,7 @@ private object AzureApi {
         if (status !in 200..299) throw IllegalStateException(azureError(text, status))
         return JSONObject(text)
     }
-    private data class DeviceCode(
+    data class DeviceCode(
         val userCode: String,
         val verificationUri: String,
         val deviceCode: String,
